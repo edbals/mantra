@@ -443,23 +443,25 @@ with tab_scores:
     with col_inv:
         st.markdown("**Investment Sub-scores**")
         w = _cfg_weights
-        subs = [
-            ("broker_flow_score",    "Broker Flow",    f"×{w.broker_flow:.2f}"),
+        # Use real broker flow score for Stage 2 tickers; never show the proxy.
+        bf_score_val = safe_float(
+            row.get("broker_flow_real_score") if row.get("broker_data_source") == "indexalpha"
+            else row.get("broker_flow_score", 0)
+        )
+        st.markdown(subscore_bar("Broker Flow (real)", f"×{w.broker_flow:.2f}", bf_score_val), unsafe_allow_html=True)
+        for col_key, label, weight in [
             ("float_pressure_score", "Float Pressure", f"×{w.float_pressure:.2f}"),
             ("structure_score",      "Structure",      f"×{w.structure:.2f}"),
             ("liquidity_score",      "Liquidity",      f"×{w.liquidity:.2f}"),
             ("catalyst_score",       "Catalyst (info)",f"×{w.catalyst:.2f}"),
-        ]
-        for col_key, label, weight in subs:
+        ]:
             v = safe_float(row.get(col_key, 0))
             st.markdown(subscore_bar(label, weight, v), unsafe_allow_html=True)
 
     with col_exec:
-        st.markdown("**Real Broker Flow (Stage 2)**")
+        st.markdown("**Real Broker Flow Signals**")
         is_real = row.get("broker_data_source") == "indexalpha"
         if is_real:
-            bf_real = safe_float(row.get("broker_flow_real_score", 0))
-            st.markdown(subscore_bar("Real BF Score", f"×{w.broker_flow:.2f}", bf_real), unsafe_allow_html=True)
 
             retail_ss  = safe_float(row.get("retail_sell_share", 0)) * 100
             absorption = safe_float(row.get("absorption_ratio", 0))
