@@ -1,5 +1,5 @@
 """
-Mantra Dashboard — RRMORA Stock Screener for IDX
+Mantra Dashboard — MyMantra
 Run: streamlit run app/dashboard.py
 """
 from __future__ import annotations
@@ -37,7 +37,7 @@ ACTION_COLORS = {
 
 # ── Page setup ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="Mantra | IDX Screener",
+    page_title="MyMantra | IDX Screener",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -240,8 +240,11 @@ def predict_pattern(row: pd.Series, flow_df: pd.DataFrame):
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## 📈 Mantra")
-    st.caption("RRMORA IDX Stock Screener")
+    _logo_path = Path(__file__).parent / "logo.png"
+    if _logo_path.exists():
+        st.image(str(_logo_path), width=120)
+    st.markdown("## MyMantra")
+    st.caption("IDX Stock Screener")
     st.divider()
 
     available_dates = cached_available_dates(CONFIG_PATH)
@@ -284,7 +287,7 @@ filtered = df[mask].copy().reset_index(drop=True)
 
 
 # ── Header row ────────────────────────────────────────────────────────────────
-st.markdown(f"## Mantra &nbsp; `{selected_date}` &nbsp; <span style='color:#555;font-size:1rem'>{len(df)} tickers scored</span>", unsafe_allow_html=True)
+st.markdown(f"## MyMantra &nbsp; `{selected_date}` &nbsp; <span style='color:#555;font-size:1rem'>{len(df)} tickers scored</span>", unsafe_allow_html=True)
 
 st.divider()
 
@@ -831,7 +834,7 @@ with tab_broker:
                         )
                     )
 
-                    st.altair_chart(_if_bar + _ref_lines, use_container_width=False)
+                    st.altair_chart(_if_bar + _ref_lines, width="stretch")
                     st.caption("Green = net buying anomaly · Red = net selling anomaly · Dashed lines: 50 (moderate), 70 (strong)")
 
 

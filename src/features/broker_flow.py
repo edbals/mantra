@@ -4,7 +4,7 @@ from __future__ import annotations
 Broker Flow Feature — adapted for IDX-API data availability.
 
 The IDX-API broker_summary table is a market-wide broker aggregate (no per-ticker
-breakdown). We therefore approximate RRMORA broker flow signals using the columns
+breakdown). We therefore approximate MyMantra broker flow signals using the columns
 that ARE available in stock_summary on a per-ticker basis:
 
     foreign_buy / foreign_sell / foreign_net  → institutional flow proxy
