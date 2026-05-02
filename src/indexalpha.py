@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
@@ -76,20 +78,35 @@ class IndexAlphaClient:
         con.close()
         return hit
 
-    def _call_api(self, ticker: str, from_date: str, to_date: str, investor: str) -> list[dict]:
+    def _call_api(
+        self,
+        ticker: str,
+        from_date: str,
+        to_date: str,
+        investor: str,
+        timeout: tuple = (8, 20),
+        _retries: int = 3,
+    ) -> list[dict]:
         if not self._api_key or self._api_key.startswith("YOUR_"):
             raise ValueError("Index Alpha API key not configured in config.json")
-        resp = requests.get(
-            f"{BASE_URL}/stocks/broker-summary",
-            params={"ticker": ticker, "from": from_date, "to": to_date, "investor": investor},
-            headers={"Authorization": f"Bearer {self._api_key}", "accept": "application/json"},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        payload = resp.json()
-        if not payload.get("success"):
-            raise RuntimeError(f"API error: {payload.get('error')}")
-        return payload.get("data") or []
+        for attempt in range(_retries):
+            resp = requests.get(
+                f"{BASE_URL}/stocks/broker-summary",
+                params={"ticker": ticker, "from": from_date, "to": to_date, "investor": investor},
+                headers={"Authorization": f"Bearer {self._api_key}", "accept": "application/json"},
+                timeout=timeout,
+            )
+            if resp.status_code == 429:
+                wait = 2 ** attempt * 5   # 5s, 10s, 20s
+                logger.warning("Rate limited — waiting %ds before retry (attempt %d/%d)", wait, attempt + 1, _retries)
+                time.sleep(wait)
+                continue
+            resp.raise_for_status()
+            payload = resp.json()
+            if not payload.get("success"):
+                raise RuntimeError(f"API error: {payload.get('error')}")
+            return payload.get("data") or []
+        raise RuntimeError(f"Rate limit not resolved after {_retries} retries for {ticker} {from_date}")
 
     def _store(self, ticker: str, date: str, investor: str, records: list[dict]) -> None:
         con = self._connect()
@@ -270,46 +287,86 @@ class IndexAlphaClient:
             cached["net_value"]  = cached["buy_value"].fillna(0)  - cached["sell_value"].fillna(0)
         return cached
 
+    def _prefetch_one(
+        self,
+        ticker: str,
+        date: str,
+        investor: str,
+        max_consec_failures: int = 3,
+    ) -> str:
+        """Fetch a single (ticker, date). Returns 'cached', 'fetched', or 'error'."""
+        if self._is_cached(ticker, date, investor):
+            return "cached"
+        try:
+            records = self._call_api(ticker, date, date, investor, timeout=(6, 15))
+            if records:
+                self._store(ticker, date, investor, records)
+            return "fetched"
+        except Exception as exc:
+            logger.warning("prefetch failed %s %s: %s", ticker, date, exc)
+            return "error"
+
     def prefetch_history(
         self,
         tickers: list[str],
         trading_dates: list[str],
         investor: str = "all",
+        workers: int = 3,
+        max_consec_errors: int = 4,
     ) -> tuple[int, int]:
         """
-        Pre-fetch individual-day broker data for a list of tickers × dates.
+        Pre-fetch individual-day broker data for tickers × dates in parallel.
         Skips any (ticker, date) already in cache.
+        Skips a ticker after max_consec_errors consecutive failures (API unreachable).
         Returns (fetched, skipped) counts.
-
-        Used to warm up the z-score history so sustained_buyers works from day 1.
-        Cost: at most len(tickers) × len(trading_dates) API calls, minus cache hits.
         """
         fetched = skipped = errors = 0
-        total = len(tickers) * len(trading_dates)
-        done  = 0
-        for t_idx, ticker in enumerate(tickers):
-            ticker_new = 0
-            for date in trading_dates:
-                done += 1
-                if self._is_cached(ticker, date, investor):
-                    skipped += 1
-                    continue
-                try:
-                    records = self._call_api(ticker, date, date, investor)
-                    if records:
-                        self._store(ticker, date, investor, records)
-                    fetched += 1
-                    ticker_new += 1
-                except Exception as exc:
-                    errors += 1
-                    logger.warning("prefetch failed %s %s: %s", ticker, date, exc)
+        n_tickers = len(tickers)
 
-            pct = done / total * 100
-            status = f"new={ticker_new}" if ticker_new else "cached"
-            print(
-                f"  [{pct:5.1f}%] {t_idx+1:>3}/{len(tickers)}  {ticker:<8} {status}",
-                flush=True,
-            )
+        for t_idx, ticker in enumerate(tickers):
+            # Build work list — skip already-cached dates up front
+            needed = [d for d in trading_dates if not self._is_cached(ticker, d, investor)]
+            already = len(trading_dates) - len(needed)
+            skipped += already
+
+            if not needed:
+                print(f"  [{t_idx+1:>3}/{n_tickers}] {ticker:<8} all cached", flush=True)
+                continue
+
+            # Parallel fetch for this ticker's missing dates
+            ticker_fetched = ticker_errors = consec_errors = 0
+            futures = {}
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                for date in needed:
+                    fut = pool.submit(self._prefetch_one, ticker, date, investor)
+                    futures[fut] = date
+
+                for fut in as_completed(futures):
+                    result = fut.result()
+                    if result == "fetched":
+                        ticker_fetched += 1
+                        consec_errors = 0
+                    elif result == "cached":
+                        skipped += 1
+                        consec_errors = 0
+                    else:
+                        ticker_errors += 1
+                        errors += 1
+                        consec_errors += 1
+
+                    if consec_errors >= max_consec_errors:
+                        logger.warning(
+                            "%s: %d consecutive errors — skipping remaining dates",
+                            ticker, consec_errors,
+                        )
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        break
+
+            fetched += ticker_fetched
+            status = f"fetched={ticker_fetched}" if ticker_fetched else "cached"
+            if ticker_errors:
+                status += f"  errors={ticker_errors}"
+            print(f"  [{t_idx+1:>3}/{n_tickers}] {ticker:<8} {status}", flush=True)
 
         print(f"  Done — fetched={fetched}  cached={skipped}  errors={errors}", flush=True)
         logger.info("prefetch_history: fetched=%d skipped=%d errors=%d", fetched, skipped, errors)

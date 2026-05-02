@@ -16,11 +16,13 @@ import streamlit as st
 from app.cache import (
     cached_available_dates,
     cached_broker_history,
+    cached_broker_master,
     cached_broker_names,
     cached_broker_summary,
     cached_scores_for_date,
     cached_ticker_flow,
     cached_ticker_history,
+    ensure_today_scored,
 )
 
 CONFIG_PATH = str(Path(__file__).parent.parent / "config.json")
@@ -45,6 +47,10 @@ st.set_page_config(
 
 st.markdown("""
 <style>
+  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+  html, body, [class*="css"], * {
+    font-family: 'Poppins', sans-serif !important;
+  }
   .ticker-header {
     background: #1A1D27;
     border-radius: 10px;
@@ -139,14 +145,14 @@ def subscore_bar(label: str, weight: str, val: float) -> str:
     </div>"""
 
 
-def concentration_gauge(buy_pct: float) -> str:
+def concentration_gauge(buy_pct: float, subtitle: str = "buy vs sell concentration") -> str:
     sell_pct = 100 - buy_pct
     sell_c, buy_c = "#FF1744", "#00C853"
     if buy_pct > 60:
-        label = "⮕ BUYING PRESSURE"
+        label = "⮕ ACCUMULATION"
         label_c = buy_c
     elif buy_pct < 40:
-        label = "⬅ SELLING PRESSURE"
+        label = "⬅ DISTRIBUTION"
         label_c = sell_c
     else:
         label = "↔ BALANCED"
@@ -155,7 +161,7 @@ def concentration_gauge(buy_pct: float) -> str:
     <div style="margin:10px 0">
       <div style="display:flex;justify-content:space-between;font-size:0.82rem;margin-bottom:5px">
         <b style="color:{sell_c}">▼ SELL {sell_pct:.0f}%</b>
-        <span style="color:#555;font-size:0.75rem">5-day foreign concentration</span>
+        <span style="color:#555;font-size:0.75rem">{subtitle}</span>
         <b style="color:{buy_c}">BUY {buy_pct:.0f}% ▲</b>
       </div>
       <div class="conc-wrap">
@@ -238,34 +244,33 @@ def predict_pattern(row: pd.Series, flow_df: pd.DataFrame):
     return "STRONG DISTRIBUTION", "#FF1744", buy_pct, reasons
 
 
+# ── Auto-run on visit ─────────────────────────────────────────────────────────
+_auto_placeholder = st.empty()
+with _auto_placeholder.container():
+    with st.spinner("Checking today's scores…"):
+        try:
+            ensure_today_scored(CONFIG_PATH)
+        except Exception as _e:
+            st.warning(f"Auto-scoring skipped: {_e}")
+_auto_placeholder.empty()
+
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    _logo_path = Path(__file__).parent / "logo.png"
-    if _logo_path.exists():
-        st.image(str(_logo_path), width=120)
     st.markdown("## MyMantra")
-    st.caption("IDX Stock Screener")
+    st.caption("A broker-flow screener for the Indonesian stock market — experimental.")
     st.divider()
 
     available_dates = cached_available_dates(CONFIG_PATH)
     if not available_dates:
-        st.error(
-            "No scored dates found.\n\n"
-            "Run the screener first:\n```\npython3 main.py\n```"
-        )
+        st.error("No scored dates found — check your IDX database path in config.json.")
         st.stop()
 
     selected_date = st.selectbox("Scoring Date", available_dates)
     st.divider()
 
-    action_options = ["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID", "ILLIQUID"]
-    selected_actions = st.multiselect(
-        "Show Actions",
-        action_options,
-        default=["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID"],
-    )
     min_invest = st.slider("Min Investment Score", 0, 100, 0)
-    only_breakout = st.checkbox("Breakout only", value=False)
+    only_breakout = st.checkbox("Breakout signals only", value=False)
+    selected_actions = ["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID"]
 
 
 # ── Load & filter data ────────────────────────────────────────────────────────
@@ -295,7 +300,7 @@ st.divider()
 # ── Rankings table ────────────────────────────────────────────────────────────
 st.markdown(
     f"### Rankings &nbsp; "
-    f"<span style='color:#555;font-size:1rem'>({len(filtered)} Stage-2 tickers — real broker flow only)</span>",
+    f"<span style='color:#555;font-size:1rem'>Top 100 by broker signal strength · scored with real broker flow data</span>",
     unsafe_allow_html=True,
 )
 
@@ -309,6 +314,7 @@ _rank_cols = [
 ]
 rank_cols = [c for c in _rank_cols if c in filtered.columns]
 rank_df = filtered[rank_cols].copy()
+rank_df.insert(0, "#", range(1, len(rank_df) + 1))
 
 if "company_name" in rank_df.columns:
     rank_df["company_name"] = rank_df["company_name"].str.slice(0, 30)
@@ -362,6 +368,10 @@ row = df[df["ticker"] == selected_ticker].iloc[0]
 # Load flow data once (cached — used in Broker Analysis and Price tabs)
 flow_df = cached_ticker_flow(selected_ticker, CONFIG_PATH, days=30)
 
+# Load config weights once for display
+from src.config import Config as _Cfg
+_cfg_weights = _Cfg.load(CONFIG_PATH).weights
+
 # Ticker header card
 action_val   = str(row.get("action", "—"))
 action_color = ACTION_COLORS.get(action_val, "#78909C")
@@ -390,7 +400,7 @@ st.markdown(
             <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">INVEST</div>
           </div>
           <div>
-            <div style="font-size:1.5rem;font-weight:700;color:{'#00C853' if breakout else '#555'}">{'YES' if breakout else 'no'}</div>
+            <div style="font-size:1.5rem;font-weight:700;color:{'#00C853' if breakout else '#555'}">{'🚀' if breakout else '—'}</div>
             <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">BREAKOUT</div>
           </div>
           <div>
@@ -419,12 +429,13 @@ with tab_scores:
 
     with col_inv:
         st.markdown("**Investment Sub-scores**")
+        w = _cfg_weights
         subs = [
-            ("broker_flow_score",    "Broker Flow",    "×0.35"),
-            ("float_pressure_score", "Float Pressure", "×0.25"),
-            ("structure_score",      "Structure",      "×0.20"),
-            ("liquidity_score",      "Liquidity",      "×0.10"),
-            ("catalyst_score",       "Catalyst",       "×0.10"),
+            ("broker_flow_score",    "Broker Flow",    f"×{w.broker_flow:.2f}"),
+            ("float_pressure_score", "Float Pressure", f"×{w.float_pressure:.2f}"),
+            ("structure_score",      "Structure",      f"×{w.structure:.2f}"),
+            ("liquidity_score",      "Liquidity",      f"×{w.liquidity:.2f}"),
+            ("catalyst_score",       "Catalyst (info)",f"×{w.catalyst:.2f}"),
         ]
         for col_key, label, weight in subs:
             v = safe_float(row.get(col_key, 0))
@@ -435,57 +446,80 @@ with tab_scores:
         is_real = row.get("broker_data_source") == "indexalpha"
         if is_real:
             bf_real = safe_float(row.get("broker_flow_real_score", 0))
-            st.markdown(subscore_bar("Real BF Score", "×0.35", bf_real), unsafe_allow_html=True)
+            st.markdown(subscore_bar("Real BF Score", f"×{w.broker_flow:.2f}", bf_real), unsafe_allow_html=True)
 
             retail_ss  = safe_float(row.get("retail_sell_share", 0)) * 100
             absorption = safe_float(row.get("absorption_ratio", 0))
             streak     = int(safe_float(row.get("accum_streak", 0)))
-            adj        = safe_float(row.get("score_adj", 0))
-            xl_days    = int(safe_float(row.get("xl_xc_trend_days", 0)))
             xl_trend   = bool(row.get("xl_xc_trend_selling", False))
+            xl_days    = int(safe_float(row.get("xl_xc_trend_days", 0)))
+            xl_selling = bool(row.get("xl_xc_selling", False))
             xl_buying  = bool(row.get("xl_xc_buying", False))
 
-            st.markdown(f"""
-| Signal | Value |
-|--------|-------|
-| Retail sell share (20d) | {retail_ss:.1f}% |
-| Absorption ratio | {absorption:.2f}× |
-| Accum streak | {streak}d |
-| Score adj | {adj:+.1f} |
-| XL/XC selling | {'⚡ +15 (bullish)' if row.get('xl_xc_selling') else '—'} |
-| XL/XC buying | {'⚠️ -15 (bearish)' if xl_buying else '—'} |
-| XL/XC trend days | {xl_days}d {'🚨 TREND' if xl_trend else ''} |
-""")
+            # Each row: (label, value, description shown as small text)
+            signal_rows = [
+                (
+                    "Retail selling pressure",
+                    f"{retail_ss:.1f}% of volume",
+                    "Share of 20-day volume that is retail net selling. Higher means more retail investors are exiting this stock.",
+                ),
+                (
+                    "Institutional absorption",
+                    f"{absorption:.2f}×",
+                    "How much of retail selling is being absorbed by institutional brokers. Above 1× means institutions buy more than retail sells — float is tightening.",
+                ),
+                (
+                    "Institutional accumulation streak",
+                    f"{streak} consecutive day{'s' if streak != 1 else ''}",
+                    "How many days in a row institutional brokers (investment banks, market makers, emitents) have been net buyers.",
+                ),
+            ]
+            if xl_selling:
+                signal_rows.append((
+                    "Retail trend today (Stockbit / Ajaib)",
+                    "⚡ Net selling — bullish signal",
+                    "Stockbit (XL) and/or Ajaib (XC) are net sellers today. Retail is exiting. When institutions simultaneously absorb this, it is a bullish divergence.",
+                ))
+            if xl_buying:
+                signal_rows.append((
+                    "Retail trend today (Stockbit / Ajaib)",
+                    "⚠️ Net buying — bearish signal",
+                    "Stockbit (XL) and/or Ajaib (XC) are net buyers today. Retail is piling in, which often signals institutions are distributing into retail demand.",
+                ))
+            if xl_trend and xl_days >= 3:
+                signal_rows.append((
+                    "Retail exit trend (Stockbit / Ajaib)",
+                    f"🚨 {xl_days} of last 10 trading days",
+                    f"Retail platforms have been net sellers on {xl_days} of the last 10 days — a sustained trend, not a one-day blip. Bullish if institutions are absorbing.",
+                ))
 
-            top_b = str(row.get("top_buyers", ""))
-            top_s = str(row.get("top_sellers", ""))
-            sust  = str(row.get("sustained_buyers", ""))
-            if top_b:
-                st.markdown(f"**Top Buyers:** `{top_b}`")
-            if top_s:
-                st.markdown(f"**Top Sellers:** `{top_s}`")
-            if sust:
-                st.markdown(f"**Sustained (z≥1.5):** `{sust}`")
+            for label, value, desc in signal_rows:
+                st.markdown(
+                    f"<div style='padding:8px 0;border-bottom:1px solid #2D3140'>"
+                    f"  <div style='display:flex;justify-content:space-between;align-items:baseline;font-size:0.85rem'>"
+                    f"    <span style='color:#CCC'>{label}</span>"
+                    f"    <b style='margin-left:12px;white-space:nowrap'>{value}</b>"
+                    f"  </div>"
+                    f"  <div style='color:#555;font-size:0.75rem;margin-top:2px'>{desc}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+
+            top_b = str(row.get("top_buyers", "")).strip()
+            top_s = str(row.get("top_sellers", "")).strip()
+            sust  = str(row.get("sustained_buyers", "")).strip()
+            st.markdown("")
+            if top_b and top_b != "nan":
+                st.markdown(f"**Institutional buyers today:** `{top_b}`")
+                st.caption("Broker code : lots bought — institutional/MM/Emitent/Zombie class only")
+            if top_s and top_s != "nan":
+                st.markdown(f"**Top sellers today:** `{top_s}`")
+                st.caption("Broker code : lots sold — all classes")
+            if sust and sust != "nan":
+                st.markdown(f"**Buying significantly above own average (z ≥ 1.5):** `{sust}`")
+                st.caption("Format: broker(class, z-score) — these brokers are buying at unusually high levels vs their own history")
         else:
-            st.info("Proxy score only — not in Stage 2 top 100 by FF×ADV blend.")
-
-        st.markdown("---")
-        st.markdown("**Technical Flags**")
-        above_ma20 = bool(safe_float(row.get("above_ma20", 0)))
-        vol_ratio  = safe_float(row.get("volume_ratio", 0))
-        streak     = int(safe_float(row.get("accum_streak", 0)))
-
-        flags = []
-        flags.append("✅ Above MA20" if above_ma20 else "❌ Below MA20")
-        flags.append("✅ Breakout signal" if breakout else "❌ No breakout")
-        if vol_ratio > 1.5:
-            flags.append(f"📈 Volume spike ×{vol_ratio:.1f}")
-        elif vol_ratio > 0:
-            flags.append(f"📊 Volume ratio ×{vol_ratio:.2f}")
-        if streak >= 3:
-            flags.append(f"🔥 {streak}-day accumulation streak")
-        for f in flags:
-            st.write(f)
+            st.info("This ticker is not in the Stage 2 top 100 — only a proxy score is available.")
 
 
 # ── Tab 2: Broker Distribution ────────────────────────────────────────────────
@@ -537,16 +571,43 @@ with tab_broker:
         # % of total net volume per broker (signed: positive = net buyer)
         bdf["net_vol_pct"] = (bdf["net_vol_m"] * 1e6 / total_vol * 100) if total_vol > 0 else 0.0
 
-        buy_pct_all = total_buy_vol / total_vol * 100 if total_vol > 0 else 50.0
+        # ── Gauge: depends on investor_type ──────────────────────────────────
+        SIGNAL_CLASSES = {"institutional", "Market_Maker", "Emitent", "Zombie"}
+        RETAIL_CLASSES  = {"retail_pure", "retail_mixed"}
 
-        # ── Summary metrics (volume-based) ────────────────────────────────────
+        inst_net = retail_net = 0.0
+        if investor_type == "all":
+            # Total buy ≡ total sell → useless. Use smart money vs retail net instead.
+            bm = cached_broker_master(CONFIG_PATH)
+            bdf_cls = bdf.merge(bm, left_on="code", right_on="broker_code", how="left")
+            bdf_cls["broker_class"] = bdf_cls["broker_class"].fillna("unknown")
+            bdf_cls["net_vol"] = bdf_cls["buy_volume"].fillna(0) - bdf_cls["sell_volume"].fillna(0)
+
+            inst_net   = float(bdf_cls[bdf_cls["broker_class"].isin(SIGNAL_CLASSES)]["net_vol"].sum())
+            retail_net = float(bdf_cls[bdf_cls["broker_class"].isin(RETAIL_CLASSES)]["net_vol"].sum())
+
+            eps = 1e-9
+            buy_pct_all = float(50 + (inst_net / (total_vol + eps)) * 300)
+            buy_pct_all = max(0.0, min(100.0, buy_pct_all))
+            gauge_subtitle = "institutional net vs retail net"
+        else:
+            buy_pct_all = total_buy_vol / total_vol * 100 if total_vol > 0 else 50.0
+            gauge_subtitle = "foreign buy vs sell" if investor_type == "f" else "domestic buy vs sell"
+
+        # ── Summary metrics ───────────────────────────────────────────────────
         m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Total Buy Volume",  f"{total_buy_vol/1e6:.1f}M lots")
-        m2.metric("Total Sell Volume", f"{total_sell_vol/1e6:.1f}M lots")
-        m3.metric("Net Volume",        f"{total_net_vol/1e6:+.1f}M lots")
-        m4.metric("Brokers Active",    len(bdf))
+        if investor_type == "all":
+            m1.metric("Institutional Net", f"{inst_net/1e6:+.2f}M lots",
+                      help="Net volume of institutional/MM/Emitent/Zombie brokers. Positive = net buying.")
+            m2.metric("Retail Net",        f"{retail_net/1e6:+.2f}M lots",
+                      help="Net volume of retail brokers (retail_pure, retail_mixed). Negative = net selling.")
+        else:
+            m1.metric("Total Buy Volume", f"{total_buy_vol/1e6:.1f}M lots")
+            m2.metric("Total Sell Volume", f"{total_sell_vol/1e6:.1f}M lots")
+        m3.metric("Total Volume", f"{total_vol/1e6:.1f}M lots")
+        m4.metric("Brokers Active", len(bdf))
 
-        st.markdown(concentration_gauge(buy_pct_all), unsafe_allow_html=True)
+        st.markdown(concentration_gauge(buy_pct_all, gauge_subtitle), unsafe_allow_html=True)
         st.divider()
 
         # ── Net accumulation chart — sorted by net volume ─────────────────────
@@ -582,31 +643,40 @@ with tab_broker:
             if v < 0: return "color: #FF1744; font-weight:bold"
             return "color: #555"
 
-        top_buyers  = bdf.nlargest(10, "net_vol_m")[["code", "name", "buy_vol_m", "sell_vol_m", "net_vol_m", "net_vol_pct", "net_value_b"]].copy()
-        top_sellers = bdf.nsmallest(10, "net_vol_m")[["code", "name", "buy_vol_m", "sell_vol_m", "net_vol_m", "net_vol_pct", "net_value_b"]].copy()
+        # Sort by actual buy/sell volume — not net — so the tables answer
+        # "who bought the most?" and "who sold the most?" clearly
+        top_buyers = (
+            bdf.nlargest(10, "buy_vol_m")
+            [["code", "name", "buy_vol_m", "sell_vol_m", "net_vol_m"]]
+            .copy()
+        )
+        top_sellers = (
+            bdf.nlargest(10, "sell_vol_m")
+            [["code", "name", "buy_vol_m", "sell_vol_m", "net_vol_m"]]
+            .copy()
+        )
 
         col_buy, col_sell = st.columns(2)
-        tbl_fmt = {"Buy (M)": "{:.2f}", "Sell (M)": "{:.2f}",
-                   "Net Vol (M)": "{:+.2f}", "Net %": "{:+.1f}%", "Net Val (B)": "{:+.2f}"}
+        tbl_fmt = {"Buy (M lots)": "{:.2f}", "Sell (M lots)": "{:.2f}", "Net (M lots)": "{:+.2f}"}
 
         with col_buy:
-            st.markdown("#### 🟢 Top Net Buyers")
-            top_buyers.columns = ["Code", "Broker", "Buy (M)", "Sell (M)", "Net Vol (M)", "Net %", "Net Val (B)"]
+            st.markdown("#### 🟢 Top Buyers  <span style='color:#555;font-size:0.8rem'>by buy volume</span>", unsafe_allow_html=True)
+            top_buyers.columns = ["Code", "Broker", "Buy (M lots)", "Sell (M lots)", "Net (M lots)"]
             st.dataframe(
                 top_buyers.style
-                .map(_net_color, subset=["Net Vol (M)", "Net %", "Net Val (B)"])
+                .map(_net_color, subset=["Net (M lots)"])
                 .format(tbl_fmt),
-                hide_index=True, width="stretch", height=320,
+                hide_index=True, width="stretch", height=340,
             )
 
         with col_sell:
-            st.markdown("#### 🔴 Top Net Sellers")
-            top_sellers.columns = ["Code", "Broker", "Buy (M)", "Sell (M)", "Net Vol (M)", "Net %", "Net Val (B)"]
+            st.markdown("#### 🔴 Top Sellers  <span style='color:#555;font-size:0.8rem'>by sell volume</span>", unsafe_allow_html=True)
+            top_sellers.columns = ["Code", "Broker", "Buy (M lots)", "Sell (M lots)", "Net (M lots)"]
             st.dataframe(
                 top_sellers.style
-                .map(_net_color, subset=["Net Vol (M)", "Net %", "Net Val (B)"])
+                .map(_net_color, subset=["Net (M lots)"])
                 .format(tbl_fmt),
-                hide_index=True, width="stretch", height=320,
+                hide_index=True, width="stretch", height=340,
             )
 
         st.divider()
@@ -697,9 +767,8 @@ with tab_broker:
                 # ── Z-score + IF combined table ───────────────────────────────
                 _baseline_days = _baseline["date"].nunique() if not _baseline.empty else 0
                 st.caption(
-                    f"Signal: {_signal_label} avg net vol  ·  "
-                    f"Baseline: {_baseline_days} trading days  ·  "
-                    f"z ≥ 1.5  ·  IF score ≥ 50"
+                    f"Comparing {_signal_label} of activity against {_baseline_days}-day historical baseline. "
+                    f"Flagged when a broker's net volume is unusually high (z-score ≥ 1.5) or the Isolation Forest model marks it as anomalous."
                 )
 
                 alerts = []

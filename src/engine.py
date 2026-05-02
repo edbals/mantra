@@ -58,7 +58,8 @@ def _stage2_real_broker_flow(master: pd.DataFrame, scoring_date: str, cfg: Confi
     )
 
     stage2_tickers = (
-        master.sort_values("_stage1_key", ascending=False)
+        master[master["action"] != "ILLIQUID"]
+        .sort_values("_stage1_key", ascending=False)
         .head(STAGE2_TOP_N)["ticker"]
         .tolist()
     )

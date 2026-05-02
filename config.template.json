@@ -1,0 +1,30 @@
+{
+  "idxdb_path": "./IDX-API/data/database.sqlite",
+  "indexalpha_api_key": "YOUR_INDEXALPHA_KEY_HERE",
+  "freefloat_csv": "./indonesia_free_float.csv",
+  "broker_master_csv": "./broker_master.csv",
+  "output_dir": "./output",
+  "scoring_date": "auto",
+  "lookback_days": 20,
+  "lookback_weeks": 4,
+  "weights": {
+    "broker_flow": 0.40,
+    "float_pressure": 0.30,
+    "structure": 0.10,
+    "liquidity": 0.20,
+    "catalyst": 0.00
+  },
+  "execution_weights": {
+    "spread_proxy": 0.50,
+    "breakout_quality": 0.25,
+    "market_regime": 0.25
+  },
+  "thresholds": {
+    "invest": 55,
+    "watch": 45,
+    "observe": 35
+  },
+  "min_avg_daily_value_idr": 500000000,
+  "min_trading_days": 10,
+  "broker_watchlist": ["YP", "CC", "ZP", "AK", "BK", "MG", "LG", "OD", "RX", "XC", "DR", "GW"]
+}

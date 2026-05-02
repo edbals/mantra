@@ -1,5 +1,6 @@
 # ── Secrets & local config ────────────────────────────────────────────────────
 config.json
+.streamlit/secrets.toml
 
 # ── Large local databases ─────────────────────────────────────────────────────
 /output/scores.db

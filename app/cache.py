@@ -89,6 +89,29 @@ def cached_ticker_flow(ticker: str, config_path: str, days: int = 30) -> pd.Data
     return df.drop(columns=["date_ms"])
 
 
+@st.cache_data(ttl=3600)
+def ensure_today_scored(config_path: str) -> str:
+    """
+    Auto-run the scoring pipeline if today's CSV does not exist yet.
+    Called on every dashboard visit; cached 1 h so it only fires once per session.
+    Returns the resolved scoring date string (YYYY-MM-DD).
+    """
+    from src.engine import score_date
+    from src.loader import IDXLoader
+
+    cfg = Config.load(config_path)
+    loader = IDXLoader(cfg)
+    scoring_ts = loader.resolve_scoring_date(cfg.scoring_date)
+    loader.close()
+    date_str = str(scoring_ts.date())
+
+    csv_path = cfg.output_dir / f"scores_{date_str}.csv"
+    if not csv_path.exists():
+        score_date(None, cfg)
+
+    return date_str
+
+
 @st.cache_data(ttl=86400)
 def cached_broker_summary(
     ticker: str,
@@ -130,6 +153,25 @@ def cached_broker_history(
         db_path=cfg.output_dir / "scores.db",
     )
     return client.get_broker_history(ticker, list(dates), investor)
+
+
+@st.cache_data(ttl=86400)
+def cached_broker_master(config_path: str) -> pd.DataFrame:
+    """Load broker_code → broker_class from broker_master CSV."""
+    cfg = Config.load(config_path)
+    df = pd.read_csv(cfg.broker_master_csv)
+    # Normalise column names — CSV may have 'Kode Perusahaan' and 'class'
+    col_map = {}
+    for c in df.columns:
+        lc = c.strip().lower()
+        if lc in ("kode perusahaan", "broker_code", "code", "kode"):
+            col_map[c] = "broker_code"
+        elif lc in ("class", "broker_class"):
+            col_map[c] = "broker_class"
+    df = df.rename(columns=col_map)[["broker_code", "broker_class"]]
+    df["broker_code"]  = df["broker_code"].astype(str).str.strip()
+    df["broker_class"] = df["broker_class"].astype(str).str.strip()
+    return df
 
 
 @st.cache_data(ttl=3600)
