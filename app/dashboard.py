@@ -265,7 +265,20 @@ with st.sidebar:
         st.error("No scored dates found — check your IDX database path in config.json.")
         st.stop()
 
-    selected_date = st.selectbox("Scoring Date", available_dates)
+    # Calendar picker constrained to dates we actually have scores for
+    _date_objs = [pd.to_datetime(d).date() for d in available_dates]
+    _picked = st.date_input(
+        "Scoring date",
+        value=_date_objs[0],
+        min_value=min(_date_objs),
+        max_value=max(_date_objs),
+        format="YYYY-MM-DD",
+    )
+    if str(_picked) not in available_dates:
+        # Fallback to nearest available date
+        _picked = min(_date_objs, key=lambda d: abs(d - _picked))
+        st.caption(f"No data for selected date — showing closest: {_picked}")
+    selected_date = str(_picked)
     st.divider()
 
     min_invest = st.slider("Min Investment Score", 0, 100, 0)
