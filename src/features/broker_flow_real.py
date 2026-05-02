@@ -92,13 +92,14 @@ def _group_net(df: pd.DataFrame, classes: set) -> float:
     return float(df[df["cls"].isin(classes)]["net_volume"].fillna(0).sum())
 
 
-def _format_presence(df: pd.DataFrame, vol_col: str, top_n: int = 3) -> str:
+def _format_presence(df: pd.DataFrame, vol_col: str, top_n: int = 3, signed: bool = True) -> str:
     parts = []
     for _, row in df.head(top_n).iterrows():
         cls_label = CLASS_DISPLAY.get(row["cls"], "")
         vol = int(row.get(vol_col, 0) or 0)
         suffix = f" ({cls_label})" if cls_label else ""
-        parts.append(f"{row['code']}{suffix} {vol:,}")
+        vol_str = f"{vol:+,}" if signed else f"{vol:,}"
+        parts.append(f"{row['code']}{suffix} {vol_str}")
     return "   ·   ".join(parts)
 
 
@@ -266,18 +267,22 @@ def score_ticker(
     )
 
     # ── Broker Presence Indicator ─────────────────────────────────────────────
-    # Show top 3 buyers and top 3 sellers across all classes — class label is
-    # appended after each broker code so the reader can see who is doing the buying/selling.
-    top_buyers_df  = today_df.nlargest(3, "buy_volume")[["code", "buy_volume", "cls"]] if not today_df.empty else pd.DataFrame()
-    top_sellers_df = today_df.nlargest(3, "sell_volume")[["code", "sell_volume", "cls"]] if not today_df.empty else pd.DataFrame()
+    # Rank by NET volume (buy - sell), not gross volume. Otherwise a broker that
+    # buys 1M and sells 1M shows up in both lists despite contributing nothing.
+    if not today_df.empty:
+        today_df = today_df.copy()
+        today_df["net_vol"] = today_df["buy_volume"].fillna(0) - today_df["sell_volume"].fillna(0)
+        top_buyers_df  = today_df.nlargest(3,  "net_vol")[["code", "net_vol", "cls"]]
+        top_sellers_df = today_df.nsmallest(3, "net_vol")[["code", "net_vol", "cls"]]
+    else:
+        top_buyers_df  = pd.DataFrame()
+        top_sellers_df = pd.DataFrame()
 
-    top_buyers_str  = _format_presence(top_buyers_df,  "buy_volume")
-    top_sellers_str = _format_presence(top_sellers_df, "sell_volume")
+    top_buyers_str  = _format_presence(top_buyers_df,  "net_vol")
+    top_sellers_str = _format_presence(top_sellers_df, "net_vol")
 
     seller_codes     = set(top_sellers_df["code"].tolist()) if not top_sellers_df.empty else set()
-    top3_buyer_codes = set(
-        today_df.nlargest(3, "buy_volume")["code"].tolist()
-    ) if not today_df.empty else set()
+    top3_buyer_codes = set(top_buyers_df["code"].tolist()) if not top_buyers_df.empty else set()
 
     # ── Score adjustments ─────────────────────────────────────────────────────
     adj = 0.0
