@@ -523,14 +523,11 @@ with tab_scores:
             sust  = str(row.get("sustained_buyers", "")).strip()
             st.markdown("")
             if top_b and top_b != "nan":
-                st.markdown(f"**Institutional buyers today:** `{top_b}`")
-                st.caption("Broker code : lots bought — institutional/MM/Emitent/Zombie class only")
+                st.markdown(f"**Top buyers today:** {top_b}")
             if top_s and top_s != "nan":
-                st.markdown(f"**Top sellers today:** `{top_s}`")
-                st.caption("Broker code : lots sold — all classes")
+                st.markdown(f"**Top sellers today:** {top_s}")
             if sust and sust != "nan":
-                st.markdown(f"**Buying significantly above own average (z ≥ 1.5):** `{sust}`")
-                st.caption("Format: broker(class, z-score) — these brokers are buying at unusually high levels vs their own history")
+                st.markdown(f"**Buying above their own average (z ≥ 1.5):** {sust}")
         else:
             st.info("This ticker is not in the Stage 2 top 100 — only a proxy score is available.")
 

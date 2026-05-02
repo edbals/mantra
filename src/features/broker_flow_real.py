@@ -40,10 +40,16 @@ logger = logging.getLogger(__name__)
 SIGNAL_CLASSES = {"institutional", "Market_Maker", "Emitent", "Zombie"}
 RETAIL_CLASSES = {"retail_pure", "retail_mixed"}
 
-FLAG_MAP = {
-    "Market_Maker": "[MM]",
-    "Emitent":      "[EMIT]",
-    "Zombie":       "[ZOM]",
+# Human-readable labels for the broker code suffix in top_buyers / top_sellers.
+# "Zombie" is renamed to "crossing" — it's the formal term for brokers running
+# crossing networks rather than directional flow.
+CLASS_DISPLAY = {
+    "institutional":  "institutional",
+    "Market_Maker":   "market maker",
+    "Emitent":        "insider",
+    "Zombie":         "crossing",
+    "retail_pure":    "retail",
+    "retail_mixed":   "retail",
 }
 
 # Boost per broker of each class that is buying above its historical average
@@ -89,10 +95,11 @@ def _group_net(df: pd.DataFrame, classes: set) -> float:
 def _format_presence(df: pd.DataFrame, vol_col: str, top_n: int = 3) -> str:
     parts = []
     for _, row in df.head(top_n).iterrows():
-        flag = FLAG_MAP.get(row["cls"], "")
-        vol  = int(row.get(vol_col, 0) or 0)
-        parts.append(f"{row['code']}:{vol:,}{flag}")
-    return "  ".join(parts)
+        cls_label = CLASS_DISPLAY.get(row["cls"], "")
+        vol = int(row.get(vol_col, 0) or 0)
+        suffix = f" ({cls_label})" if cls_label else ""
+        parts.append(f"{row['code']}{suffix} {vol:,}")
+    return "   ·   ".join(parts)
 
 
 def _compute_streak(ticker: str, scoring_date: str, client: "IndexAlphaClient", master: pd.DataFrame) -> int:
@@ -259,12 +266,13 @@ def score_ticker(
     )
 
     # ── Broker Presence Indicator ─────────────────────────────────────────────
-    # top_buyers: signal-class only (institutional/MM/Emitent/Zombie) — retail buying is noise
-    signal_buyers_df = today_df[today_df["cls"].isin(SIGNAL_CLASSES)].nlargest(3, "buy_volume")[["code", "buy_volume", "cls"]] if not today_df.empty else pd.DataFrame()
-    top_sellers_df   = today_df.nlargest(3, "sell_volume")[["code", "sell_volume", "cls"]] if not today_df.empty else pd.DataFrame()
+    # Show top 3 buyers and top 3 sellers across all classes — class label is
+    # appended after each broker code so the reader can see who is doing the buying/selling.
+    top_buyers_df  = today_df.nlargest(3, "buy_volume")[["code", "buy_volume", "cls"]] if not today_df.empty else pd.DataFrame()
+    top_sellers_df = today_df.nlargest(3, "sell_volume")[["code", "sell_volume", "cls"]] if not today_df.empty else pd.DataFrame()
 
-    top_buyers_str  = _format_presence(signal_buyers_df, "buy_volume")
-    top_sellers_str = _format_presence(top_sellers_df,   "sell_volume")
+    top_buyers_str  = _format_presence(top_buyers_df,  "buy_volume")
+    top_sellers_str = _format_presence(top_sellers_df, "sell_volume")
 
     seller_codes     = set(top_sellers_df["code"].tolist()) if not top_sellers_df.empty else set()
     top3_buyer_codes = set(
@@ -298,7 +306,7 @@ def score_ticker(
 
     # Human-readable sustained buyers list
     sustained_buyers = [
-        f"{code}({cls[:4]},z={z:.1f})"
+        f"{code} ({CLASS_DISPLAY.get(cls, '')}, z={z:.1f})"
         for code, (z, cls) in sorted(above_avg.items(), key=lambda x: -x[1][0])
     ]
 
