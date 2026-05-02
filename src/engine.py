@@ -5,6 +5,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from src.config import Config
@@ -81,14 +82,14 @@ def _stage2_real_broker_flow(master: pd.DataFrame, scoring_date: str, cfg: Confi
 
     # Prefetch 20 trading days of per-day history so z-score works from day 1
     loader2 = IDXLoader(cfg)
-    stock_snap = loader2.load_stock_summary(pd.Timestamp(scoring_date), 20)
+    stock_snap = loader2.load_stock_summary(pd.Timestamp(scoring_date), 60)
     loader2.close()
     trading_dates = sorted(
         stock_snap[stock_snap["date"] <= pd.Timestamp(scoring_date)]["date"]
         .drop_duplicates()
         .apply(lambda d: str(d.date()) if hasattr(d, "date") else str(d))
         .tolist()
-    )[-20:]
+    )[-60:]   # 60 days → stable z-score baselines; only costs extra on first run
     fetched, skipped = client.prefetch_history(stage2_tickers, trading_dates)
     logger.info("History prefetch: %d new, %d cached", fetched, skipped)
 
@@ -259,15 +260,25 @@ def score_date(date: str | None, cfg: Config) -> ScoringResult:
             # catalyst excluded from investment_score (Mantra 2.2 — informational only)
         )
 
+        # ── Interaction term: broker_flow × float tightness (Wurgler-Zhuravskaya) ──
+        # Hypothesis: broker flow signal has greater price impact when float is tight.
+        # float_amplifier: LOW float (5%) → ~1.0, MID (20%) → ~0.53, HIGH (50%) → ~0.23
+        # Bonus capped at +7 pts — additive, keeps weights valid.
+        ff_pct = master.loc[real_mask, "free_float_pct"].fillna(0.5).clip(0.01, 1.0)
+        float_amplifier = (np.log(1.0 / ff_pct) / np.log(20)).clip(0, 1)
+        interaction_bonus = 7.0 * float_amplifier * (real_bf / 100)
+
         # XL/XC trend boost — scaled by free float category × trend days
         trend_days = master.loc[real_mask, "xl_xc_trend_days"].fillna(0)
         ff_cat     = master.loc[real_mask, "ff_category"].fillna("HIGH")
         ff_max     = ff_cat.map(_FF_TREND_BOOST).fillna(0.0)
         trend_boost = ff_max * (trend_days / 10).clip(0, 1)
 
-        master.loc[real_mask, "investment_score"] = (base + trend_boost).clip(0, 100)
+        master.loc[real_mask, "investment_score"] = (
+            base + interaction_bonus + trend_boost
+        ).clip(0, 100)
         logger.info(
-            "Recomputed investment_score (real BF + XL/XC trend boost) for %d tickers",
+            "Recomputed investment_score (real BF + interaction + XL/XC trend boost) for %d tickers",
             real_mask.sum(),
         )
         # Reapply decision labels now that investment_score has changed

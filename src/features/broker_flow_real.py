@@ -61,7 +61,7 @@ XL_XC_TREND_DAYS  = 3     # min days of XL/XC net selling in last 10 to flag tre
 
 # z-score threshold to consider a broker "buying above average"
 Z_THRESH        = 1.5
-MIN_HISTORY_DAYS = 5
+MIN_HISTORY_DAYS = 20   # <20 gives ~30% std error on σ; 20 is the practical minimum
 
 # Normalisation caps
 RETAIL_SELL_CAP = 0.30   # 30% retail net selling of total vol = max

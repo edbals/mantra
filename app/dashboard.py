@@ -612,29 +612,26 @@ with tab_broker:
         from src.config import Config as _Cfg
         _watchlist = _Cfg.load(CONFIG_PATH).broker_watchlist or []
 
-        _aw_col, _tw_col, _sw_col = st.columns([2, 2, 2])
+        st.markdown("#### Watchlist Broker Anomalies")
+        _aw_col, _sw_col = st.columns(2)
         with _aw_col:
-            st.markdown("#### Watchlist Broker Anomalies")
-        with _tw_col:
-            _window_label = st.radio(
+            _window_label = st.selectbox(
                 "Baseline window",
-                options=["1 week", "2 weeks", "1 month"],
+                options=["1 week (5d)", "2 weeks (10d)", "1 month (22d)"],
                 index=2,
-                horizontal=True,
                 key="anomaly_window",
             )
         with _sw_col:
-            _signal_label = st.radio(
+            _signal_label = st.selectbox(
                 "Compare period",
                 options=["Today", "3 days", "5 days"],
                 index=0,
-                horizontal=True,
                 key="anomaly_signal",
             )
 
-        _window_days = {"1 week": 5, "2 weeks": 10, "1 month": 22}[_window_label]
+        _window_days = {"1 week (5d)": 5, "2 weeks (10d)": 10, "1 month (22d)": 22}[_window_label]
         _signal_days = {"Today": 1, "3 days": 3, "5 days": 5}[_signal_label]
-        _min_history = max(3, _window_days // 2)
+        _min_history = max(5, _window_days // 2)
 
         if not _watchlist:
             st.info("Add broker codes to `broker_watchlist` in config.json to enable anomaly detection.")
@@ -771,6 +768,71 @@ with tab_broker:
                         "**IF Score**: 0–100, higher = more anomalous per Isolation Forest  ·  "
                         "🔴 ≥ 70 strong anomaly  ·  🟠 ≥ 50 moderate"
                     )
+
+                # ── IF anomaly score chart (all watchlist brokers) ────────────
+                if not _if_scores.empty:
+                    st.markdown("**Isolation Forest — All Watchlist Brokers**")
+                    _chart_df = _if_scores.copy()
+                    _chart_df["name"] = _chart_df["code"].map(broker_names).fillna(_chart_df["code"])
+                    _chart_df["label"] = _chart_df["code"] + " — " + _chart_df["name"].str.slice(0, 20)
+                    _chart_df["color"] = _chart_df.apply(
+                        lambda r: "#FF1744" if r["direction"] == "selling"
+                        else "#00C853" if r["direction"] == "buying"
+                        else "#78909C",
+                        axis=1,
+                    )
+                    _chart_df = _chart_df.sort_values("anomaly_score", ascending=True)
+
+                    _if_bar = (
+                        alt.Chart(_chart_df)
+                        .mark_bar()
+                        .encode(
+                            y=alt.Y("label:N", sort=None, title=None),
+                            x=alt.X(
+                                "anomaly_score:Q",
+                                title="IF Anomaly Score (0–100)",
+                                scale=alt.Scale(domain=[0, 100]),
+                            ),
+                            color=alt.Color(
+                                "color:N",
+                                scale=None,
+                                legend=alt.Legend(
+                                    title="Direction",
+                                    values=["#00C853", "#FF1744", "#78909C"],
+                                    labelExpr=(
+                                        "datum.value === '#00C853' ? 'Buying' : "
+                                        "datum.value === '#FF1744' ? 'Selling' : 'Neutral'"
+                                    ),
+                                ),
+                            ),
+                            tooltip=[
+                                alt.Tooltip("code:N", title="Broker"),
+                                alt.Tooltip("anomaly_score:Q", title="IF Score", format=".1f"),
+                                alt.Tooltip("direction:N", title="Direction"),
+                            ],
+                        )
+                        .properties(height=max(150, len(_chart_df) * 28))
+                    )
+
+                    # Reference lines at 50 and 70
+                    _ref = pd.DataFrame([{"x": 50, "label": "Moderate"}, {"x": 70, "label": "Strong"}])
+                    _ref_lines = (
+                        alt.Chart(_ref)
+                        .mark_rule(strokeDash=[4, 4], opacity=0.6)
+                        .encode(
+                            x="x:Q",
+                            color=alt.Color(
+                                "label:N",
+                                scale=alt.Scale(
+                                    domain=["Moderate", "Strong"],
+                                    range=["#FF6D00", "#FF1744"],
+                                ),
+                            ),
+                        )
+                    )
+
+                    st.altair_chart(_if_bar + _ref_lines, use_container_width=False)
+                    st.caption("Green = net buying anomaly · Red = net selling anomaly · Dashed lines: 50 (moderate), 70 (strong)")
 
 
 # ── Tab 3: Price & Volume ─────────────────────────────────────────────────────
