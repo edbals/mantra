@@ -257,7 +257,7 @@ _auto_placeholder.empty()
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("## MyMantra")
-    st.caption("A broker-flow screener for the Indonesian stock market — experimental.")
+    st.caption("An experimental broker-flow screener for the Indonesian stock market.")
     st.divider()
 
     available_dates = cached_available_dates(CONFIG_PATH)
