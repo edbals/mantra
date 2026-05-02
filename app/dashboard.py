@@ -1,0 +1,893 @@
+"""
+Mantra Dashboard — RRMORA Stock Screener for IDX
+Run: streamlit run app/dashboard.py
+"""
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+import altair as alt
+import pandas as pd
+import streamlit as st
+
+from app.cache import (
+    cached_available_dates,
+    cached_broker_history,
+    cached_broker_names,
+    cached_broker_summary,
+    cached_scores_for_date,
+    cached_ticker_flow,
+    cached_ticker_history,
+)
+
+CONFIG_PATH = str(Path(__file__).parent.parent / "config.json")
+
+# ── Design constants ──────────────────────────────────────────────────────────
+ACTION_COLORS = {
+    "INVEST":     "#00C853",
+    "WATCH_EXEC": "#D4E600",
+    "WATCH":      "#FFB300",
+    "OBSERVE":    "#FF6D00",
+    "AVOID":      "#FF1744",
+    "ILLIQUID":   "#78909C",
+}
+
+# ── Page setup ────────────────────────────────────────────────────────────────
+st.set_page_config(
+    page_title="Mantra | IDX Screener",
+    page_icon="📈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+st.markdown("""
+<style>
+  .ticker-header {
+    background: #1A1D27;
+    border-radius: 10px;
+    padding: 16px 24px;
+    margin-bottom: 12px;
+  }
+  .badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 5px;
+    font-weight: 700;
+    font-size: 0.78rem;
+    letter-spacing: 0.5px;
+  }
+  .signal-box {
+    border-radius: 8px;
+    padding: 14px 18px;
+    margin-bottom: 8px;
+  }
+  .subscore-row { margin: 7px 0; }
+  .subscore-label {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.84rem;
+    margin-bottom: 3px;
+  }
+  .bar-track {
+    background: #2D3140;
+    border-radius: 4px;
+    height: 8px;
+    overflow: hidden;
+  }
+  .bar-fill { height: 8px; border-radius: 4px; }
+  .conc-wrap {
+    background: #2D3140;
+    border-radius: 6px;
+    height: 14px;
+    overflow: hidden;
+    position: relative;
+    margin: 8px 0 4px 0;
+  }
+  .conc-sell { position: absolute; left: 0;  top: 0; height: 100%; background: #FF1744; }
+  .conc-buy  { position: absolute; right: 0; top: 0; height: 100%; background: #00C853; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def safe_float(val, default: float = 0.0) -> float:
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
+def fmt(val, spec: str = ",.0f", fallback: str = "N/A") -> str:
+    try:
+        return format(float(val), spec)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def score_color(v: float) -> str:
+    if v >= 70:   return "#00C853"
+    if v >= 50:   return "#FFB300"
+    if v >= 35:   return "#FF6D00"
+    return "#FF1744"
+
+
+def action_badge_html(action: str) -> str:
+    c = ACTION_COLORS.get(action, "#78909C")
+    return (
+        f"<span class='badge' "
+        f"style='background:{c}22;color:{c};border:1px solid {c}'>"
+        f"{action}</span>"
+    )
+
+
+def subscore_bar(label: str, weight: str, val: float) -> str:
+    pct = min(max(val, 0), 100)
+    c = score_color(pct)
+    return f"""
+    <div class="subscore-row">
+      <div class="subscore-label">
+        <span style="color:#CCC">{label} <span style="color:#555">{weight}</span></span>
+        <b style="color:{c}">{val:.1f}</b>
+      </div>
+      <div class="bar-track">
+        <div class="bar-fill" style="width:{pct}%;background:{c}"></div>
+      </div>
+    </div>"""
+
+
+def concentration_gauge(buy_pct: float) -> str:
+    sell_pct = 100 - buy_pct
+    sell_c, buy_c = "#FF1744", "#00C853"
+    if buy_pct > 60:
+        label = "⮕ BUYING PRESSURE"
+        label_c = buy_c
+    elif buy_pct < 40:
+        label = "⬅ SELLING PRESSURE"
+        label_c = sell_c
+    else:
+        label = "↔ BALANCED"
+        label_c = "#78909C"
+    return f"""
+    <div style="margin:10px 0">
+      <div style="display:flex;justify-content:space-between;font-size:0.82rem;margin-bottom:5px">
+        <b style="color:{sell_c}">▼ SELL {sell_pct:.0f}%</b>
+        <span style="color:#555;font-size:0.75rem">5-day foreign concentration</span>
+        <b style="color:{buy_c}">BUY {buy_pct:.0f}% ▲</b>
+      </div>
+      <div class="conc-wrap">
+        <div class="conc-sell" style="width:{sell_pct}%"></div>
+        <div class="conc-buy"  style="width:{buy_pct}%"></div>
+      </div>
+      <div style="text-align:center;font-size:0.75rem;color:{label_c};margin-top:4px">
+        {label}
+      </div>
+    </div>"""
+
+
+def predict_pattern(row: pd.Series, flow_df: pd.DataFrame):
+    """Return (signal, color, buy_pct, reasons) based on foreign net flow signals."""
+    net_1d  = safe_float(row.get("net_flow_1d",  0))
+    net_3d  = safe_float(row.get("net_flow_3d",  0))
+    net_5d  = safe_float(row.get("net_flow_5d",  0))
+    net_10d = safe_float(row.get("net_flow_10d", 0))
+    streak  = int(safe_float(row.get("accum_streak", 0)))
+
+    rate_3d  = net_3d  / 3  if net_3d  != 0 else 0.0
+    rate_10d = net_10d / 10 if net_10d != 0 else 0.0
+
+    score = 0
+    reasons: list[str] = []
+
+    # Short-term direction
+    if net_1d > 0 and rate_3d > 0:
+        score += 2
+        reasons.append(f"Net inflow last 3 days (+{net_3d/1e6:.1f}M shares)")
+    elif net_1d < 0 and rate_3d < 0:
+        score -= 2
+        reasons.append(f"Net outflow last 3 days ({net_3d/1e6:.1f}M shares)")
+
+    # Sustained direction
+    rate_5d = net_5d / 5 if net_5d != 0 else 0.0
+    if rate_5d > 0 and rate_10d > 0:
+        score += 2
+        reasons.append(f"Sustained 10-day inflow (+{net_10d/1e6:.1f}M total)")
+    elif rate_5d < 0 and rate_10d < 0:
+        score -= 2
+        reasons.append(f"Sustained 10-day outflow ({net_10d/1e6:.1f}M total)")
+
+    # Accumulation streak
+    if streak >= 5:
+        score += 2
+        reasons.append(f"{streak}-day consecutive foreign accumulation")
+    elif streak >= 3:
+        score += 1
+        reasons.append(f"{streak}-day accumulation streak")
+
+    # Acceleration vs 10-day baseline
+    if rate_10d != 0:
+        accel = (net_1d - rate_10d) / (abs(rate_10d) + 1e-9)
+        if accel > 0.5 and net_1d > 0:
+            score += 1
+            reasons.append("Inflow accelerating above 10-day average")
+        elif accel < -0.5 and net_1d < 0:
+            score -= 1
+            reasons.append("Outflow accelerating below 10-day average")
+
+    # 5-day buy concentration from live IDX-API data
+    buy_pct = 50.0
+    if not flow_df.empty:
+        recent = flow_df.head(5)
+        total_buy  = recent["foreign_buy"].sum()
+        total_sell = recent["foreign_sell"].sum()
+        total = total_buy + total_sell
+        if total > 0:
+            buy_pct = float(total_buy / total * 100)
+
+    if score >= 4:
+        return "STRONG ACCUMULATION", "#00C853", buy_pct, reasons
+    if score >= 2:
+        return "ACCUMULATING", "#64DD17", buy_pct, reasons
+    if score >= 0:
+        return "NEUTRAL", "#78909C", buy_pct, reasons
+    if score >= -2:
+        return "DISTRIBUTING", "#FF6D00", buy_pct, reasons
+    return "STRONG DISTRIBUTION", "#FF1744", buy_pct, reasons
+
+
+# ── Sidebar ───────────────────────────────────────────────────────────────────
+with st.sidebar:
+    st.markdown("## 📈 Mantra")
+    st.caption("RRMORA IDX Stock Screener")
+    st.divider()
+
+    available_dates = cached_available_dates(CONFIG_PATH)
+    if not available_dates:
+        st.error(
+            "No scored dates found.\n\n"
+            "Run the screener first:\n```\npython3 main.py\n```"
+        )
+        st.stop()
+
+    selected_date = st.selectbox("Scoring Date", available_dates)
+    st.divider()
+
+    action_options = ["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID", "ILLIQUID"]
+    selected_actions = st.multiselect(
+        "Show Actions",
+        action_options,
+        default=["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID"],
+    )
+    min_invest = st.slider("Min Investment Score", 0, 100, 0)
+    only_breakout = st.checkbox("Breakout only", value=False)
+
+
+# ── Load & filter data ────────────────────────────────────────────────────────
+df = cached_scores_for_date(selected_date, CONFIG_PATH)
+if df.empty:
+    st.warning(f"No data found for {selected_date}.")
+    st.stop()
+
+stage2_only = "broker_data_source" in df.columns
+mask = (
+    df["action"].isin(selected_actions)
+    & (df["investment_score"] >= min_invest)
+)
+if stage2_only:
+    mask = mask & (df["broker_data_source"] == "indexalpha")
+if only_breakout and "breakout_signal" in df.columns:
+    mask = mask & df["breakout_signal"].fillna(False).astype(bool)
+filtered = df[mask].copy().reset_index(drop=True)
+
+
+# ── Header row ────────────────────────────────────────────────────────────────
+st.markdown(f"## Mantra &nbsp; `{selected_date}` &nbsp; <span style='color:#555;font-size:1rem'>{len(df)} tickers scored</span>", unsafe_allow_html=True)
+
+st.divider()
+
+
+# ── Rankings table ────────────────────────────────────────────────────────────
+st.markdown(
+    f"### Rankings &nbsp; "
+    f"<span style='color:#555;font-size:1rem'>({len(filtered)} Stage-2 tickers — real broker flow only)</span>",
+    unsafe_allow_html=True,
+)
+
+_rank_cols = [
+    "ticker", "company_name", "action",
+    "investment_score", "breakout_signal",
+    "broker_flow_real_score",
+    "float_pressure_score", "structure_score",
+    "liquidity_score", "catalyst_score",
+    "ff_category", "avg_daily_value_idr", "close",
+]
+rank_cols = [c for c in _rank_cols if c in filtered.columns]
+rank_df = filtered[rank_cols].copy()
+
+if "company_name" in rank_df.columns:
+    rank_df["company_name"] = rank_df["company_name"].str.slice(0, 30)
+
+score_cols = [c for c in rank_cols if c.endswith("_score")]
+
+fmt_map: dict = {c: "{:.1f}" for c in score_cols}
+fmt_map["avg_daily_value_idr"] = "{:,.0f}"
+if "close" in rank_df.columns:
+    fmt_map["close"] = lambda v: fmt(v, ",.0f")
+
+
+def _color_action_cell(v: str) -> str:
+    c = ACTION_COLORS.get(str(v), "#78909C")
+    return f"color: {c}; font-weight: bold"
+
+
+def _color_score_bg(v) -> str:
+    try:
+        pct = float(v)
+    except (TypeError, ValueError):
+        return ""
+    if pct >= 70:   return "background-color: #00C85330; color: #00C853"
+    if pct >= 55:   return "background-color: #FFB30030; color: #FFB300"
+    if pct >= 40:   return "background-color: #FF6D0030; color: #FF6D00"
+    return "background-color: #FF174430; color: #FF1744"
+
+
+score_subset = [c for c in ["investment_score", "broker_flow_real_score", "broker_flow_score"] if c in rank_df.columns]
+styled_rank = (
+    rank_df.style
+    .map(_color_action_cell, subset=["action"])
+    .map(_color_score_bg, subset=score_subset)
+    .format(fmt_map, na_rep="—")
+)
+st.dataframe(styled_rank, width="stretch", height=430)
+
+
+# ── Ticker detail panel ───────────────────────────────────────────────────────
+st.divider()
+st.markdown("### Ticker Detail")
+
+ticker_list = filtered["ticker"].tolist() if not filtered.empty else df["ticker"].tolist()
+if not ticker_list:
+    st.info("No tickers match the current filters.")
+    st.stop()
+
+selected_ticker = st.selectbox("Select ticker", ticker_list, key="ticker_sel")
+row = df[df["ticker"] == selected_ticker].iloc[0]
+
+# Load flow data once (cached — used in Broker Analysis and Price tabs)
+flow_df = cached_ticker_flow(selected_ticker, CONFIG_PATH, days=30)
+
+# Ticker header card
+action_val   = str(row.get("action", "—"))
+action_color = ACTION_COLORS.get(action_val, "#78909C")
+inv_score    = safe_float(row.get("investment_score", 0))
+breakout     = bool(row.get("breakout_signal", False))
+company      = str(row.get("company_name", selected_ticker))
+if company == selected_ticker:
+    company = ""
+
+close_disp   = fmt(row.get("close"), ",.0f")
+avg_idr      = safe_float(row.get("avg_daily_value_idr", 0))
+avg_idr_disp = f"{avg_idr/1e9:.1f}B" if avg_idr else "N/A"
+
+st.markdown(
+    f"""
+    <div class="ticker-header" style="border-left:4px solid {action_color}">
+      <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
+        <div>
+          <div style="font-size:1.9rem;font-weight:800;line-height:1.1">{selected_ticker}</div>
+          <div style="color:#666;font-size:0.82rem">{company}</div>
+        </div>
+        {action_badge_html(action_val)}
+        <div style="margin-left:auto;display:flex;gap:28px;text-align:center">
+          <div>
+            <div style="font-size:1.5rem;font-weight:700;color:{score_color(inv_score)}">{inv_score:.1f}</div>
+            <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">INVEST</div>
+          </div>
+          <div>
+            <div style="font-size:1.5rem;font-weight:700;color:{'#00C853' if breakout else '#555'}">{'YES' if breakout else 'no'}</div>
+            <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">BREAKOUT</div>
+          </div>
+          <div>
+            <div style="font-size:1.1rem;font-weight:600">{close_disp}</div>
+            <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">CLOSE IDR</div>
+          </div>
+          <div>
+            <div style="font-size:1.1rem;font-weight:600">{avg_idr_disp}</div>
+            <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">AVG/DAY IDR</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+tab_scores, tab_broker, tab_price, tab_history = st.tabs(
+    ["📊 Scores", "🏦 Broker Analysis", "📈 Price & Volume", "📅 History"]
+)
+
+
+# ── Tab 1: Scores ─────────────────────────────────────────────────────────────
+with tab_scores:
+    col_inv, col_exec = st.columns(2)
+
+    with col_inv:
+        st.markdown("**Investment Sub-scores**")
+        subs = [
+            ("broker_flow_score",    "Broker Flow",    "×0.35"),
+            ("float_pressure_score", "Float Pressure", "×0.25"),
+            ("structure_score",      "Structure",      "×0.20"),
+            ("liquidity_score",      "Liquidity",      "×0.10"),
+            ("catalyst_score",       "Catalyst",       "×0.10"),
+        ]
+        for col_key, label, weight in subs:
+            v = safe_float(row.get(col_key, 0))
+            st.markdown(subscore_bar(label, weight, v), unsafe_allow_html=True)
+
+    with col_exec:
+        st.markdown("**Real Broker Flow (Stage 2)**")
+        is_real = row.get("broker_data_source") == "indexalpha"
+        if is_real:
+            bf_real = safe_float(row.get("broker_flow_real_score", 0))
+            st.markdown(subscore_bar("Real BF Score", "×0.35", bf_real), unsafe_allow_html=True)
+
+            retail_ss  = safe_float(row.get("retail_sell_share", 0)) * 100
+            absorption = safe_float(row.get("absorption_ratio", 0))
+            streak     = int(safe_float(row.get("accum_streak", 0)))
+            adj        = safe_float(row.get("score_adj", 0))
+            xl_days    = int(safe_float(row.get("xl_xc_trend_days", 0)))
+            xl_trend   = bool(row.get("xl_xc_trend_selling", False))
+            xl_buying  = bool(row.get("xl_xc_buying", False))
+
+            st.markdown(f"""
+| Signal | Value |
+|--------|-------|
+| Retail sell share (20d) | {retail_ss:.1f}% |
+| Absorption ratio | {absorption:.2f}× |
+| Accum streak | {streak}d |
+| Score adj | {adj:+.1f} |
+| XL/XC selling | {'⚡ +15 (bullish)' if row.get('xl_xc_selling') else '—'} |
+| XL/XC buying | {'⚠️ -15 (bearish)' if xl_buying else '—'} |
+| XL/XC trend days | {xl_days}d {'🚨 TREND' if xl_trend else ''} |
+""")
+
+            top_b = str(row.get("top_buyers", ""))
+            top_s = str(row.get("top_sellers", ""))
+            sust  = str(row.get("sustained_buyers", ""))
+            if top_b:
+                st.markdown(f"**Top Buyers:** `{top_b}`")
+            if top_s:
+                st.markdown(f"**Top Sellers:** `{top_s}`")
+            if sust:
+                st.markdown(f"**Sustained (z≥1.5):** `{sust}`")
+        else:
+            st.info("Proxy score only — not in Stage 2 top 100 by FF×ADV blend.")
+
+        st.markdown("---")
+        st.markdown("**Technical Flags**")
+        above_ma20 = bool(safe_float(row.get("above_ma20", 0)))
+        vol_ratio  = safe_float(row.get("volume_ratio", 0))
+        streak     = int(safe_float(row.get("accum_streak", 0)))
+
+        flags = []
+        flags.append("✅ Above MA20" if above_ma20 else "❌ Below MA20")
+        flags.append("✅ Breakout signal" if breakout else "❌ No breakout")
+        if vol_ratio > 1.5:
+            flags.append(f"📈 Volume spike ×{vol_ratio:.1f}")
+        elif vol_ratio > 0:
+            flags.append(f"📊 Volume ratio ×{vol_ratio:.2f}")
+        if streak >= 3:
+            flags.append(f"🔥 {streak}-day accumulation streak")
+        for f in flags:
+            st.write(f)
+
+
+# ── Tab 2: Broker Distribution ────────────────────────────────────────────────
+with tab_broker:
+    broker_names = cached_broker_names(CONFIG_PATH)
+
+    # Controls row
+    bc1, bc2 = st.columns([2, 1])
+    with bc1:
+        investor_type = st.radio(
+            "Investor type",
+            options=["all", "f", "d"],
+            format_func=lambda x: {"all": "All Investors", "f": "Foreign Only", "d": "Domestic Only"}[x],
+            horizontal=True,
+            key="broker_investor",
+        )
+    with bc2:
+        broker_date = st.date_input(
+            "Date",
+            value=pd.to_datetime(selected_date).date(),
+            key="broker_date",
+        )
+
+    broker_date_str = str(broker_date)
+
+    # Fetch data (cached locally after first call)
+    bdf, api_error = cached_broker_summary(selected_ticker, broker_date_str, investor_type, CONFIG_PATH)
+
+    if api_error:
+        st.error(f"API error: {api_error}")
+        st.stop()
+
+    if bdf.empty:
+        st.info(f"No broker data for {selected_ticker} on {broker_date_str}. "
+                "Try a different date — weekends and public holidays have no data.")
+    else:
+        # ── Enrich ────────────────────────────────────────────────────────────
+        bdf["name"]        = bdf["code"].map(broker_names).fillna(bdf["code"])
+        bdf["net_vol_m"]   = (bdf["buy_volume"].fillna(0) - bdf["sell_volume"].fillna(0)) / 1e6
+        bdf["buy_vol_m"]   = bdf["buy_volume"].fillna(0) / 1e6
+        bdf["sell_vol_m"]  = bdf["sell_volume"].fillna(0) / 1e6
+        bdf["net_value_b"] = bdf["net_value"] / 1e9
+
+        total_buy_vol  = bdf["buy_volume"].fillna(0).sum()
+        total_sell_vol = bdf["sell_volume"].fillna(0).sum()
+        total_net_vol  = total_buy_vol - total_sell_vol
+        total_vol      = total_buy_vol + total_sell_vol
+
+        # % of total net volume per broker (signed: positive = net buyer)
+        bdf["net_vol_pct"] = (bdf["net_vol_m"] * 1e6 / total_vol * 100) if total_vol > 0 else 0.0
+
+        buy_pct_all = total_buy_vol / total_vol * 100 if total_vol > 0 else 50.0
+
+        # ── Summary metrics (volume-based) ────────────────────────────────────
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric("Total Buy Volume",  f"{total_buy_vol/1e6:.1f}M lots")
+        m2.metric("Total Sell Volume", f"{total_sell_vol/1e6:.1f}M lots")
+        m3.metric("Net Volume",        f"{total_net_vol/1e6:+.1f}M lots")
+        m4.metric("Brokers Active",    len(bdf))
+
+        st.markdown(concentration_gauge(buy_pct_all), unsafe_allow_html=True)
+        st.divider()
+
+        # ── Net accumulation chart — sorted by net volume ─────────────────────
+        st.markdown("#### Net Volume by Broker  <span style='color:#555;font-size:0.8rem'>(green = net buyer, red = net seller)</span>", unsafe_allow_html=True)
+
+        chart_df = bdf.nlargest(20, "buy_volume")[["code", "net_vol_m"]].copy()
+        chart_df = chart_df.sort_values("net_vol_m", ascending=True)
+
+        net_bar = (
+            alt.Chart(chart_df)
+            .mark_bar()
+            .encode(
+                y=alt.Y("code:N", sort=None, title=None),
+                x=alt.X("net_vol_m:Q", title="Net Volume (M lots)"),
+                color=alt.condition(
+                    alt.datum["net_vol_m"] > 0,
+                    alt.value("#00C853"),
+                    alt.value("#FF1744"),
+                ),
+                tooltip=[
+                    alt.Tooltip("code:N", title="Broker"),
+                    alt.Tooltip("net_vol_m:Q", title="Net Vol (M)", format="+.2f"),
+                ],
+            )
+            .properties(height=max(200, len(chart_df) * 22))
+        )
+        st.altair_chart(net_bar, width="stretch")
+        st.divider()
+
+        # ── Top Net Buyers / Top Net Sellers ──────────────────────────────────
+        def _net_color(v: float) -> str:
+            if v > 0: return "color: #00C853; font-weight:bold"
+            if v < 0: return "color: #FF1744; font-weight:bold"
+            return "color: #555"
+
+        top_buyers  = bdf.nlargest(10, "net_vol_m")[["code", "name", "buy_vol_m", "sell_vol_m", "net_vol_m", "net_vol_pct", "net_value_b"]].copy()
+        top_sellers = bdf.nsmallest(10, "net_vol_m")[["code", "name", "buy_vol_m", "sell_vol_m", "net_vol_m", "net_vol_pct", "net_value_b"]].copy()
+
+        col_buy, col_sell = st.columns(2)
+        tbl_fmt = {"Buy (M)": "{:.2f}", "Sell (M)": "{:.2f}",
+                   "Net Vol (M)": "{:+.2f}", "Net %": "{:+.1f}%", "Net Val (B)": "{:+.2f}"}
+
+        with col_buy:
+            st.markdown("#### 🟢 Top Net Buyers")
+            top_buyers.columns = ["Code", "Broker", "Buy (M)", "Sell (M)", "Net Vol (M)", "Net %", "Net Val (B)"]
+            st.dataframe(
+                top_buyers.style
+                .map(_net_color, subset=["Net Vol (M)", "Net %", "Net Val (B)"])
+                .format(tbl_fmt),
+                hide_index=True, width="stretch", height=320,
+            )
+
+        with col_sell:
+            st.markdown("#### 🔴 Top Net Sellers")
+            top_sellers.columns = ["Code", "Broker", "Buy (M)", "Sell (M)", "Net Vol (M)", "Net %", "Net Val (B)"]
+            st.dataframe(
+                top_sellers.style
+                .map(_net_color, subset=["Net Vol (M)", "Net %", "Net Val (B)"])
+                .format(tbl_fmt),
+                hide_index=True, width="stretch", height=320,
+            )
+
+        st.divider()
+
+        # ── Watchlist Z-score anomaly detection ───────────────────────────────
+        from src.config import Config as _Cfg
+        _watchlist = _Cfg.load(CONFIG_PATH).broker_watchlist or []
+
+        _aw_col, _tw_col, _sw_col = st.columns([2, 2, 2])
+        with _aw_col:
+            st.markdown("#### Watchlist Broker Anomalies")
+        with _tw_col:
+            _window_label = st.radio(
+                "Baseline window",
+                options=["1 week", "2 weeks", "1 month"],
+                index=2,
+                horizontal=True,
+                key="anomaly_window",
+            )
+        with _sw_col:
+            _signal_label = st.radio(
+                "Compare period",
+                options=["Today", "3 days", "5 days"],
+                index=0,
+                horizontal=True,
+                key="anomaly_signal",
+            )
+
+        _window_days = {"1 week": 5, "2 weeks": 10, "1 month": 22}[_window_label]
+        _signal_days = {"Today": 1, "3 days": 3, "5 days": 5}[_signal_label]
+        _min_history = max(3, _window_days // 2)
+
+        if not _watchlist:
+            st.info("Add broker codes to `broker_watchlist` in config.json to enable anomaly detection.")
+        else:
+            # Fetch enough days to cover both signal period and baseline
+            _hist_dates = tuple(str(d) for d in pd.bdate_range(
+                end=broker_date_str, periods=_window_days + _signal_days + 2
+            ).strftime("%Y-%m-%d").tolist())
+
+            _hist = cached_broker_history(
+                selected_ticker,
+                _hist_dates,
+                investor_type,
+                CONFIG_PATH,
+            )
+
+            _days_cached = _hist["date"].nunique() if not _hist.empty else 0
+            _days_needed = _min_history + _signal_days
+
+            if _hist.empty or _days_cached < _days_needed:
+                st.info(
+                    f"Need at least {_days_needed} days cached for "
+                    f"**{_signal_label}** vs **{_window_label}**. "
+                    f"Have {_days_cached} day(s).  \n"
+                    "Each date you view in Broker Analysis gets cached automatically."
+                )
+            else:
+                import numpy as np
+                from src.anomaly import score_brokers
+
+                _hist_wl = _hist[_hist["code"].isin(_watchlist)].copy()
+
+                # Signal period: last _signal_days business days up to broker_date_str
+                _signal_dates = pd.bdate_range(
+                    end=broker_date_str, periods=_signal_days
+                ).strftime("%Y-%m-%d").tolist()
+                _signal_start = _signal_dates[0]
+
+                # Baseline: all history BEFORE the signal period (unbiased)
+                _baseline = _hist_wl[_hist_wl["date"] < _signal_start]
+
+                # Signal DataFrame: rows for the signal period
+                if _signal_days == 1:
+                    _today_wl = bdf[bdf["code"].isin(_watchlist)].copy()
+                    _today_wl["date"] = broker_date_str
+                    _signal_df = _today_wl
+                else:
+                    _signal_df = _hist_wl[_hist_wl["date"].isin(_signal_dates)].copy()
+
+                # Mean net_volume per broker over signal period (for z-score)
+                _signal_by_code = (
+                    _signal_df.groupby("code")["net_volume"].mean().to_dict()
+                )
+
+                # ── Isolation Forest scores ───────────────────────────────────
+                _if_scores = score_brokers(_baseline, _signal_df)
+                _if_map = _if_scores.set_index("code")["anomaly_score"].to_dict() if not _if_scores.empty else {}
+                _if_label_map = _if_scores.set_index("code")["if_label"].to_dict() if not _if_scores.empty else {}
+
+                # ── Z-score + IF combined table ───────────────────────────────
+                _baseline_days = _baseline["date"].nunique() if not _baseline.empty else 0
+                st.caption(
+                    f"Signal: {_signal_label} avg net vol  ·  "
+                    f"Baseline: {_baseline_days} trading days  ·  "
+                    f"z ≥ 1.5  ·  IF score ≥ 50"
+                )
+
+                alerts = []
+                for code, signal_net in _signal_by_code.items():
+                    hist_broker = _baseline[_baseline["code"] == code]["net_volume"]
+                    if len(hist_broker) < _min_history:
+                        continue
+
+                    # Z-score
+                    mean = hist_broker.mean()
+                    std  = hist_broker.std()
+                    z    = (signal_net - mean) / std if std > 1 else 0.0
+
+                    # IF score
+                    if_score = _if_map.get(code)
+                    if_flagged = (_if_label_map.get(code) == -1)
+
+                    # Include if flagged by either method
+                    if abs(z) < 1.5 and not if_flagged:
+                        continue
+
+                    name = broker_names.get(code, code)
+                    direction = "🟢 BUYING" if signal_net > 0 else "🔴 SELLING"
+                    alerts.append({
+                        "Broker":                           f"{code} — {name}",
+                        f"Signal [{_signal_label}] (M)":   signal_net / 1e6,
+                        f"Baseline [{_window_label}] (M)": mean / 1e6,
+                        "Z-Score":                          z,
+                        "IF Score":                         if_score if if_score is not None else "—",
+                        "Direction":                        direction,
+                    })
+
+                if not alerts:
+                    st.success(
+                        f"No anomalies — {_signal_label} activity is within the {_window_label} baseline."
+                    )
+                else:
+                    alerts_df = pd.DataFrame(alerts).sort_values(
+                        "Z-Score", key=lambda s: s.abs() if s.dtype != object else s.fillna(0).abs(),
+                        ascending=False,
+                    )
+                    sig_col  = f"Signal [{_signal_label}] (M)"
+                    base_col = f"Baseline [{_window_label}] (M)"
+
+                    def _if_color(v) -> str:
+                        try:
+                            score = float(v)
+                            if score >= 70: return "background-color:#FF174430;color:#FF1744;font-weight:bold"
+                            if score >= 50: return "background-color:#FF6D0030;color:#FF6D00"
+                        except (TypeError, ValueError):
+                            pass
+                        return ""
+
+                    num_if = [c for c in [sig_col, base_col, "Z-Score"] if c in alerts_df.columns]
+                    st.dataframe(
+                        alerts_df.style
+                        .map(_net_color, subset=num_if)
+                        .map(_if_color,  subset=["IF Score"])
+                        .format({
+                            sig_col:   "{:+.2f}",
+                            base_col:  "{:+.2f}",
+                            "Z-Score": "{:+.1f}",
+                        }, na_rep="—"),
+                        hide_index=True,
+                        width="stretch",
+                    )
+
+                    st.caption(
+                        "**IF Score**: 0–100, higher = more anomalous per Isolation Forest  ·  "
+                        "🔴 ≥ 70 strong anomaly  ·  🟠 ≥ 50 moderate"
+                    )
+
+
+# ── Tab 3: Price & Volume ─────────────────────────────────────────────────────
+with tab_price:
+    if not flow_df.empty:
+        price_df = flow_df.copy()
+        price_df["Date"]   = pd.to_datetime(price_df["date"].astype(str))
+        price_df = price_df.sort_values("Date")
+
+        close_line = (
+            alt.Chart(price_df)
+            .mark_line(color="#DFFE23", strokeWidth=2)
+            .encode(
+                x=alt.X("Date:T", title=None),
+                y=alt.Y("close:Q", title="Close (IDR)", scale=alt.Scale(zero=False)),
+                tooltip=["Date:T", alt.Tooltip("close:Q", format=",.0f", title="Close")],
+            )
+            .properties(height=220, title=f"{selected_ticker} — Close Price")
+        )
+
+        vol_bar = (
+            alt.Chart(price_df)
+            .mark_bar(color="#70858F", opacity=0.7)
+            .encode(
+                x=alt.X("Date:T", title=None),
+                y=alt.Y("volume:Q", title="Volume"),
+                tooltip=["Date:T", alt.Tooltip("volume:Q", format=",.0f", title="Volume")],
+            )
+            .properties(height=110, title="Volume")
+        )
+
+        st.altair_chart(
+            alt.vconcat(close_line, vol_bar).resolve_scale(x="shared"),
+            width="stretch",
+        )
+
+        # Summary row
+        latest_px = price_df.iloc[-1]
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Close",    fmt(latest_px.get("close")))
+        c2.metric("Volume",   fmt(latest_px.get("volume")))
+        h20 = price_df["high"].max() if "high" in price_df.columns else None
+        l20 = price_df["low"].min()  if "low"  in price_df.columns else None
+        c3.metric("20-day High", fmt(h20))
+        c4.metric("20-day Low",  fmt(l20))
+
+    else:
+        # Fallback to scores CSV data
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Close",  fmt(row.get("close")))
+        c2.metric("Volume", fmt(row.get("volume")))
+        c3.metric("Vol Ratio ×20d avg", fmt(row.get("volume_ratio", 0), ".2f") + "×")
+
+        above_flag = bool(safe_float(row.get("above_ma20", 0)))
+        st.markdown("**Technical**")
+        st.write("Above MA20:", "Yes" if above_flag else "No")
+        st.info(
+            "Sync the IDX-API database for a full price chart:\n```\n"
+            "cd /Users/edbert/IDX-API && deno run -A sync_for_mantra.ts\n```"
+        )
+
+
+# ── Tab 4: History ────────────────────────────────────────────────────────────
+with tab_history:
+    hist = cached_ticker_history(selected_ticker, CONFIG_PATH)
+    if hist.empty:
+        st.info("No score history yet — run the screener on multiple days to build history.")
+    else:
+        hist = hist.sort_values("date").copy()
+        hist["date"] = pd.to_datetime(hist["date"].astype(str))
+
+        score_vars = [c for c in ["investment_score", "broker_flow_real_score"] if c in hist.columns]
+        melted = hist.melt(
+            "date",
+            value_vars=score_vars,
+            var_name="Metric",
+            value_name="Score",
+        )
+        melted["Metric"] = melted["Metric"].map({
+            "investment_score":       "Investment",
+            "broker_flow_real_score": "BF Real",
+        })
+
+        score_chart = (
+            alt.Chart(melted)
+            .mark_line(strokeWidth=2)
+            .encode(
+                x=alt.X("date:T", title=None),
+                y=alt.Y("Score:Q", scale=alt.Scale(domain=[0, 100]), title="Score"),
+                color=alt.Color(
+                    "Metric:N",
+                    scale=alt.Scale(
+                        domain=["Investment", "BF Real"],
+                        range=["#DFFE23", "#70858F"],
+                    ),
+                ),
+                tooltip=["date:T", "Metric:N", alt.Tooltip("Score:Q", format=".1f")],
+            )
+            .properties(height=260, title=f"{selected_ticker} — Score History")
+        )
+        st.altair_chart(score_chart, width="stretch")
+
+        # Action history table
+        hist_cols = [c for c in ["date", "action", "investment_score", "broker_flow_real_score", "breakout_signal"] if c in hist.columns]
+        hist_disp = hist[hist_cols].copy()
+        hist_disp["date"] = hist_disp["date"].dt.strftime("%Y-%m-%d")
+        hist_disp = hist_disp.sort_values("date", ascending=False)
+
+        def _col_action(v: str) -> str:
+            c = ACTION_COLORS.get(str(v), "#78909C")
+            return f"color: {c}; font-weight: bold"
+
+        fmt_hist = {c: "{:.1f}" for c in ["investment_score", "broker_flow_real_score"] if c in hist_disp.columns}
+        st.dataframe(
+            hist_disp.style
+            .map(_col_action, subset=["action"])
+            .format(fmt_hist, na_rep="—"),
+            hide_index=True,
+            width="stretch",
+        )
