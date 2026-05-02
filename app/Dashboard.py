@@ -47,10 +47,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
-  html, body, [class*="css"], * {
-    font-family: 'Poppins', sans-serif !important;
-  }
+  /* Use Streamlit default fonts — overriding broke Material Symbols icons. */
   .ticker-header {
     background: #1A1D27;
     border-radius: 10px;
@@ -326,8 +323,9 @@ _rank_cols = [
     "ff_category", "avg_daily_value_idr", "close",
 ]
 rank_cols = [c for c in _rank_cols if c in filtered.columns]
-rank_df = filtered[rank_cols].copy()
-rank_df.insert(0, "#", range(1, len(rank_df) + 1))
+rank_df = filtered[rank_cols].copy().reset_index(drop=True)
+rank_df.index = rank_df.index + 1
+rank_df.index.name = "Rank"
 
 if "company_name" in rank_df.columns:
     rank_df["company_name"] = rank_df["company_name"].str.slice(0, 30)
@@ -370,12 +368,18 @@ st.dataframe(styled_rank, width="stretch", height=430)
 st.divider()
 st.markdown("### Ticker Detail")
 
-ticker_list = filtered["ticker"].tolist() if not filtered.empty else df["ticker"].tolist()
+# Constrain ticker selector to the visible (filtered) rankings table only.
+ticker_list = filtered["ticker"].tolist()
 if not ticker_list:
-    st.info("No tickers match the current filters.")
+    st.info("No tickers match the current filters. Adjust the sidebar filters.")
     st.stop()
 
-selected_ticker = st.selectbox("Select ticker", ticker_list, key="ticker_sel")
+selected_ticker = st.selectbox(
+    "Select ticker",
+    ticker_list,
+    key="ticker_sel",
+    help="Only tickers shown in the rankings table above are selectable.",
+)
 row = df[df["ticker"] == selected_ticker].iloc[0]
 
 # Load flow data once (cached — used in Broker Analysis and Price tabs)
