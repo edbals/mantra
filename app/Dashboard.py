@@ -524,16 +524,11 @@ with tab_scores:
                     unsafe_allow_html=True,
                 )
 
-            top_b = str(row.get("top_buyers", "")).strip()
-            top_s = str(row.get("top_sellers", "")).strip()
-            sust  = str(row.get("sustained_buyers", "")).strip()
-            st.markdown("")
-            if top_b and top_b != "nan":
-                st.markdown(f"**Top buyers today:** {top_b}")
-            if top_s and top_s != "nan":
-                st.markdown(f"**Top sellers today:** {top_s}")
+            sust = str(row.get("sustained_buyers", "")).strip()
             if sust and sust != "nan":
+                st.markdown("")
                 st.markdown(f"**Buying above their own average (z ≥ 1.5):** {sust}")
+                st.caption("See the Broker Analysis tab for the full top buyers / sellers breakdown.")
         else:
             st.info("This ticker is not in the Stage 2 top 100 — only a proxy score is available.")
 
