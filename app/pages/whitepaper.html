@@ -1,0 +1,555 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MyMantra: Indonesian Equity Screener</title>
+
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+            color: #1e293b;
+        }
+
+        h1, h2, h3, h4, h5, .serif {
+            font-family: 'Merriweather', serif;
+        }
+
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.4s ease-in-out;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 650px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 350px;
+            max-height: 400px;
+            background: #ffffff;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            box-shadow: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+        }
+
+        @media (max-width: 768px) {
+            .chart-container {
+                height: 250px;
+                padding: 0.5rem;
+            }
+        }
+
+        .nav-item.active {
+            background-color: #e2e8f0;
+            color: #0f172a;
+            border-left: 4px solid #3b82f6;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body class="flex flex-col md:flex-row min-h-screen">
+
+    <aside class="w-full md:w-72 bg-white border-r border-slate-200 flex-shrink-0 sticky top-0 md:h-screen overflow-y-auto">
+        <div class="p-6">
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">MyMantra</h1>
+            <p class="text-xs font-medium text-slate-500 uppercase tracking-widest mt-1 mb-6">v2.2 · Indonesian Equities</p>
+
+            <nav class="space-y-1" id="main-nav">
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-4">Deliverables</div>
+                <button onclick="switchTab('summary')" data-target="summary" class="nav-item active w-full text-left px-4 py-3 rounded-r-md text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                    Executive Summary
+                </button>
+
+                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider mb-2 mt-8">Research White Paper</div>
+                <button onclick="switchTab('intro')" data-target="intro" class="nav-item w-full text-left px-4 py-3 rounded-r-md text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                    1. The Indonesian Context
+                </button>
+                <button onclick="switchTab('architecture')" data-target="architecture" class="nav-item w-full text-left px-4 py-3 rounded-r-md text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                    2. Two-Stage Architecture
+                </button>
+                <button onclick="switchTab('scoring')" data-target="scoring" class="nav-item w-full text-left px-4 py-3 rounded-r-md text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                    3. Scoring & Amplification
+                </button>
+                <button onclick="switchTab('anomaly')" data-target="anomaly" class="nav-item w-full text-left px-4 py-3 rounded-r-md text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                    4. Anomaly Detection (IF)
+                </button>
+                <button onclick="switchTab('conclusion')" data-target="conclusion" class="nav-item w-full text-left px-4 py-3 rounded-r-md text-sm text-slate-600 hover:bg-slate-50 transition-colors">
+                    5. Output & Limitations
+                </button>
+            </nav>
+
+            <div class="mt-12 p-4 bg-orange-50 border border-orange-100 rounded-lg text-xs text-orange-800 leading-relaxed">
+                <strong>Disclaimer:</strong> This tool is experimental and designed for research purposes within the Indonesian market. It is not financial advice. Past screening signals do not guarantee future returns.
+            </div>
+        </div>
+    </aside>
+
+    <main class="flex-1 p-6 md:p-12 lg:p-16 overflow-y-auto w-full max-w-5xl mx-auto">
+
+        <section id="summary" class="tab-content active">
+            <header class="mb-10">
+                <h1 class="text-4xl text-slate-900 mb-4">Executive Summary</h1>
+                <p class="text-xl text-slate-600 font-light leading-relaxed">A guiding overview of the MyMantra system and how to utilize its outputs.</p>
+            </header>
+
+            <div class="bg-white p-8 rounded-xl shadow-sm border border-slate-200 mb-8">
+                <h3 class="text-xl font-bold text-slate-800 mb-4">What is MyMantra?</h3>
+                <p class="mb-4">MyMantra is a quantitative stock screener built <strong>exclusively for the Indonesian Stock Exchange (IDX)</strong>. It is designed to identify the probability of institutional accumulation by analyzing market microstructure data specific to Indonesia—namely, transparent broker transaction flow, free-float pressure, and liquidity.</p>
+                <p>Unlike standard technical screeners, MyMantra looks under the hood of price action. In Indonesia, every equity transaction is publicly attributed to a broker code. This unique market feature allows us to observe whether institutional entities are accumulating a stock, and critically, whether retail participants are exiting.</p>
+            </div>
+
+            <h3 class="text-2xl font-bold text-slate-800 mb-6 mt-12">How to Use the Output</h3>
+            <p class="mb-6 text-slate-600">The system processes all ~870 listed Indonesian equities and categorizes them into actionable, priority-ordered decision labels. You should use these labels to guide your fundamental and technical research, <strong>not as blind trading signals</strong>.</p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-10">
+                <div class="p-5 border-l-4 border-green-500 bg-green-50 rounded-r-lg">
+                    <div class="font-bold text-green-800 text-lg mb-1">🟢 INVEST</div>
+                    <p class="text-sm text-green-700">Score &ge; 55 <strong>AND</strong> Breakout Signal Active. Institutional accumulation is clear, and the price is confirming the move with above-average volume. Prime candidates for immediate analysis.</p>
+                </div>
+                <div class="p-5 border-l-4 border-yellow-400 bg-yellow-50 rounded-r-lg">
+                    <div class="font-bold text-yellow-800 text-lg mb-1">🟡 WATCH_EXEC</div>
+                    <p class="text-sm text-yellow-800">Score &ge; 55 but NO breakout. Strong underlying accumulation is occurring quietly. Add to priority watchlist and wait for price confirmation before entry.</p>
+                </div>
+                <div class="p-5 border-l-4 border-amber-500 bg-amber-50 rounded-r-lg">
+                    <div class="font-bold text-amber-800 text-lg mb-1">🟡 WATCH</div>
+                    <p class="text-sm text-amber-800">Score 45–54. Accumulation is building. Monitor over the coming days to see if the score increases.</p>
+                </div>
+                <div class="p-5 border-l-4 border-orange-500 bg-orange-50 rounded-r-lg">
+                    <div class="font-bold text-orange-800 text-lg mb-1">🟠 OBSERVE</div>
+                    <p class="text-sm text-orange-800">Score 35–44. On the radar, but no actionable or sustained signal yet.</p>
+                </div>
+                <div class="p-5 border-l-4 border-red-500 bg-red-50 rounded-r-lg">
+                    <div class="font-bold text-red-800 text-lg mb-1">🔴 AVOID</div>
+                    <p class="text-sm text-red-800">Score &lt; 35, or suspended by the OJK. Unfavorable flow dynamics or regulatory risk.</p>
+                </div>
+                <div class="p-5 border-l-4 border-slate-400 bg-slate-100 rounded-r-lg">
+                    <div class="font-bold text-slate-700 text-lg mb-1">⚫ ILLIQUID</div>
+                    <p class="text-sm text-slate-600">Average daily traded value &lt; IDR 500M. Cannot be traded in meaningful size. Excluded from all metrics.</p>
+                </div>
+            </div>
+
+            <div class="bg-blue-50 p-6 rounded-lg border border-blue-100">
+                <h4 class="font-bold text-blue-900 mb-2">Key Takeaway for Users</h4>
+                <p class="text-sm text-blue-800">Look for stocks transitioning from <strong>WATCH_EXEC</strong> to <strong>INVEST</strong>. Pay special attention to stocks where retail brokers (like XL/XC/YP) are net sellers while institutions are absorbing the volume. Always verify liquidity before execution.</p>
+            </div>
+        </section>
+
+        <section id="intro" class="tab-content">
+            <header class="mb-10">
+                <h2 class="text-3xl text-slate-900 mb-2">1. The Indonesian Context</h2>
+                <p class="text-lg text-slate-500">Market Microstructure and the Value of Broker Flow.</p>
+            </header>
+
+            <div class="prose max-w-none text-slate-700 space-y-6">
+                <p class="lead text-xl">In quantitative finance, tracking institutional accumulation is notoriously difficult. In most developed markets, order-flow data is proprietary, aggregated, or anonymized. The Indonesian Stock Exchange (IDX) presents a unique structural advantage.</p>
+
+                <p>In Indonesia, equity transactions are publicly attributed to specific broker codes at the end of the trading day. This transparency provides an empirical window into the behavior of different market participants. It is possible to observe, in near real-time, whether institutional brokers are accumulating or distributing a stock.</p>
+
+                <div class="bg-white border border-slate-200 p-6 rounded-lg my-8">
+                    <h4 class="font-bold text-slate-900 mb-4 border-b pb-2">Structurally Important Signals on the IDX</h4>
+                    <ul class="space-y-4">
+                        <li class="flex items-start">
+                            <span class="text-blue-500 mr-3 text-xl">■</span>
+                            <div>
+                                <strong class="text-slate-900">Institutional Net Buying:</strong> When large institutional and market-maker brokerages buy significantly above their own historical averages, it strongly suggests informed accumulation.
+                            </div>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-orange-500 mr-3 text-xl">■</span>
+                            <div>
+                                <strong class="text-slate-900">Retail Net Selling:</strong> Retail participation in Indonesia is heavily concentrated in a few platforms (Stockbit/XL, Ajaib/XC, Mirae/YP). When these specific retail brokers are net sellers, supply overhang is removed, allowing institutions to absorb shares quietly without spiking the price immediately.
+                            </div>
+                        </li>
+                        <li class="flex items-start">
+                            <span class="text-green-500 mr-3 text-xl">■</span>
+                            <div>
+                                <strong class="text-slate-900">Absorption Ratio:</strong> If institutional buying outpaces retail selling, the free float tightens. Consequently, the price impact of any subsequent buying pressure increases exponentially.
+                            </div>
+                        </li>
+                    </ul>
+                </div>
+
+                <p>MyMantra systematically captures these relationships. It strictly avoids pseudoscientific trading concepts, focusing instead on empirical volume distribution, standard deviations of broker activity, and the quantitative mechanics of supply and demand within the isolated Indonesian ecosystem.</p>
+            </div>
+        </section>
+
+        <section id="architecture" class="tab-content">
+            <header class="mb-10">
+                <h2 class="text-3xl text-slate-900 mb-2">2. Two-Stage Architecture</h2>
+                <p class="text-lg text-slate-500">Pipeline orchestration for performance and precision.</p>
+            </header>
+
+            <div class="prose max-w-none text-slate-700 space-y-6">
+                <p>Evaluating ~870 listed entities using granular, per-broker historical data is computationally expensive and subject to API rate limits. Therefore, MyMantra employs a funnel-based, two-stage scoring architecture.</p>
+
+                <div class="my-10 p-6 bg-slate-50 rounded-xl border border-slate-200">
+                    <div class="flex flex-col md:flex-row items-center justify-between space-y-6 md:space-y-0 md:space-x-4 text-center">
+                        <div class="flex-1 bg-white p-4 rounded-lg shadow-sm border border-slate-200 w-full">
+                            <div class="text-sm font-bold text-slate-400 uppercase tracking-wide mb-2">Stage 1</div>
+                            <div class="text-xl font-bold text-slate-800">All ~870 Tickers</div>
+                            <div class="text-sm text-slate-500 mt-2">Local SQLite DB</div>
+                            <div class="mt-3 text-xs text-left bg-slate-50 p-2 rounded">
+                                Proxy scoring based on aggregate volume. Fast, cheap, no external API calls.
+                            </div>
+                        </div>
+
+                        <div class="text-slate-400 text-3xl font-bold">&rarr;</div>
+
+                        <div class="flex-1 bg-blue-600 text-white p-4 rounded-lg shadow-sm w-full">
+                            <div class="text-sm font-bold text-blue-200 uppercase tracking-wide mb-2">Filter</div>
+                            <div class="text-xl font-bold">Top 100</div>
+                            <div class="text-sm text-blue-100 mt-2">Ranked by Float Pressure</div>
+                        </div>
+
+                        <div class="text-slate-400 text-3xl font-bold">&rarr;</div>
+
+                        <div class="flex-1 bg-white p-4 rounded-lg shadow-sm border border-slate-200 border-t-4 border-t-blue-500 w-full">
+                            <div class="text-sm font-bold text-slate-400 uppercase tracking-wide mb-2">Stage 2</div>
+                            <div class="text-xl font-bold text-slate-800">Real Broker Flow</div>
+                            <div class="text-sm text-slate-500 mt-2">Index Alpha API</div>
+                            <div class="mt-3 text-xs text-left bg-slate-50 p-2 rounded">
+                                Per-broker Z-Score analysis, retail trend detection (XL/XC/YP).
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <h3 class="text-2xl font-bold text-slate-800 mt-10">Stage 1: Proxy Scoring Components</h3>
+                <p>The first stage computes five feature scores (0–100) based on aggregated data. The classes used are Institutional, Market Maker, Emitent (issuer-affiliated), Crossing (arbitrage), and Retail.</p>
+
+                <div class="flex flex-col md:flex-row items-center mt-8 gap-8">
+                    <div class="w-full md:w-1/2">
+                        <div class="chart-container" style="height: 300px;">
+                            <canvas id="weightsChart"></canvas>
+                        </div>
+                    </div>
+                    <div class="w-full md:w-1/2 space-y-4">
+                        <div>
+                            <strong class="text-slate-900">1. Broker Flow (40%)</strong>
+                            <p class="text-sm mt-1">Stage 1 uses a proxy from aggregate broker classes; Stage 2 replaces it with real Index Alpha data including z-score sustained buyers and absorption ratio.</p>
+                        </div>
+                        <div>
+                            <strong class="text-slate-900">2. Float Pressure (30%)</strong>
+                            <p class="text-sm mt-1">Measures turnover relative to the free float. Identifies how rapidly the available supply is changing hands.</p>
+                        </div>
+                        <div>
+                            <strong class="text-slate-900">3. Liquidity (20%)</strong>
+                            <p class="text-sm mt-1">Filters un-tradable stocks. Must average &gt; IDR 500M/day. Evaluates the spread proxy (high-low range vs close).</p>
+                        </div>
+                        <div>
+                            <strong class="text-slate-900">4. Structure (10%)</strong>
+                            <p class="text-sm mt-1">Price/volume structure relative to the IHSG index (e.g., 20-day range compression, MA alignment).</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-6 p-4 bg-slate-100 rounded-lg text-sm">
+                    <strong>Note on Catalyst (0% weight):</strong> Corporate events (dividends, splits, rights issues) within specific windows are logged for informational context but do not mathematically alter the investment score, preserving the purity of the flow signal.
+                </div>
+            </div>
+        </section>
+
+        <section id="scoring" class="tab-content">
+            <header class="mb-10">
+                <h2 class="text-3xl text-slate-900 mb-2">3. Stage 2 Scoring & Amplification</h2>
+                <p class="text-lg text-slate-500">Z-Scores, Retail Trends, and the Wurgler-Zhuravskaya Float Amplifier.</p>
+            </header>
+
+            <div class="prose max-w-none text-slate-700 space-y-6">
+                <p>For the top 100 tickers selected from Stage 1, MyMantra fetches per-broker transaction volumes going back 60 trading days via the Index Alpha API.</p>
+
+                <h3 class="text-2xl font-bold text-slate-800 mt-8">Z-Score Sustained Buyers</h3>
+                <p>For every active non-retail broker, the system computes a Z-score against that broker's own historical baseline over the last 20+ days:</p>
+
+                <div class="bg-slate-800 text-green-400 p-4 rounded-lg font-mono text-sm overflow-x-auto text-center my-4">
+                    z = (net_volume_today - &mu;_historical) / &sigma;_historical
+                </div>
+
+                <p>A broker is flagged as "buying significantly above average" when <strong>z &ge; 1.5</strong>. Brokers crossing this threshold add a "Presence Boost" to the ticker's score (Market Makers +12, Emitent +10, Institutions +8, Crossing +6; capped at +30 total).</p>
+
+                <h3 class="text-2xl font-bold text-slate-800 mt-10">The Float Amplifier (Interaction Term)</h3>
+                <p>Inspired by the academic framework of Wurgler &amp; Zhuravskaya (2002), which demonstrates that stocks with fewer arbitrage substitutes (tight free floats) experience larger price reactions to demand shocks, MyMantra applies a non-linear <strong>Float Amplifier</strong>.</p>
+                <p>The intuition: An institution buying 10,000 lots of a low-float stock moves the price significantly more than buying 10,000 lots of a highly liquid, large-cap stock.</p>
+
+                <div class="chart-container mt-8">
+                    <canvas id="floatAmplifierChart"></canvas>
+                </div>
+                <p class="text-sm text-center text-slate-500 mt-2 mb-8">Figure 1: Float Amplifier Multiplier Curve based on Free Float Percentage.</p>
+
+                <div class="bg-slate-800 text-green-400 p-4 rounded-lg font-mono text-sm overflow-x-auto text-center my-4">
+                    float_amplifier = clip( log(1 / free_float_pct) / log(20), 0, 1 )<br>
+                    interaction_bonus = 7.0 &times; float_amplifier &times; (broker_flow_real_score / 100)
+                </div>
+
+                <h3 class="text-2xl font-bold text-slate-800 mt-10">Retail Trend Boost</h3>
+                <p>Because retail platforms XL (Stockbit), XC (Ajaib) and YP (Mirae HOTS) represent the bulk of retail participation in Indonesia, their sustained net selling is an empirical indicator of retail exhaustion. If these platforms are net sellers for 3 or more of the last 10 trading days, a <strong>Trend Boost</strong> (up to +5 points) is applied, heavily biased toward low-float equities.</p>
+            </div>
+        </section>
+
+        <section id="anomaly" class="tab-content">
+            <header class="mb-10">
+                <h2 class="text-3xl text-slate-900 mb-2">4. Anomaly Detection via Isolation Forest</h2>
+                <p class="text-lg text-slate-500">A multi-dimensional approach to unusual broker activity.</p>
+            </header>
+
+            <div class="prose max-w-none text-slate-700 space-y-6">
+                <p>While the Z-score is fast and interpretable, it assumes broker net volume is approximately normally distributed. To complement this, MyMantra implements an <strong>Isolation Forest</strong> (Liu, Ting, &amp; Zhou, 2008) machine learning model trained per-broker.</p>
+
+                <p>The Isolation Forest makes no distributional assumptions. It identifies observations that are "easy to isolate" from the rest of the historical data—meaning they sit in sparse regions of the multidimensional feature space.</p>
+
+                <div class="bg-white border border-slate-200 p-6 rounded-lg my-8">
+                    <h4 class="font-bold text-slate-900 mb-4">Feature Space (Per Broker, Per Day)</h4>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+                        <div class="p-3 bg-slate-50 rounded"><strong>net_volume:</strong> Raw net lots (buy - sell)</div>
+                        <div class="p-3 bg-slate-50 rounded"><strong>buy_volume:</strong> Raw buy lots</div>
+                        <div class="p-3 bg-slate-50 rounded"><strong>sell_volume:</strong> Raw sell lots</div>
+                        <div class="p-3 bg-slate-50 rounded"><strong>buy_ratio:</strong> buy / (buy + sell)</div>
+                        <div class="p-3 bg-slate-50 rounded md:col-span-2 text-center border border-slate-200"><strong>net_ratio:</strong> net / (buy + sell)</div>
+                    </div>
+                </div>
+
+                <p>The model is strictly fitted <em>only</em> on historical data to prevent lookahead bias. The current trading day's activity is passed through the fitted model.</p>
+
+                <div class="flex items-center space-x-4 mt-6">
+                    <div class="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center text-red-600 font-bold text-xl flex-shrink-0">&ge; 70</div>
+                    <div>
+                        <strong class="text-slate-900">Highly Anomalous</strong>
+                        <p class="text-sm text-slate-600">The broker is acting in a way completely detached from their recent historical profile. Requires immediate investigation.</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4 mt-4">
+                    <div class="w-16 h-16 rounded-full bg-yellow-100 flex items-center justify-center text-yellow-600 font-bold text-xl flex-shrink-0">50-70</div>
+                    <div>
+                        <strong class="text-slate-900">Moderately Unusual</strong>
+                        <p class="text-sm text-slate-600">Deviation from the norm, often seen during the beginning phases of accumulation.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="conclusion" class="tab-content">
+            <header class="mb-10">
+                <h2 class="text-3xl text-slate-900 mb-2">5. Limitations & Risk Profile</h2>
+                <p class="text-lg text-slate-500">Critical constraints of quantitative market microstructure analysis.</p>
+            </header>
+
+            <div class="prose max-w-none text-slate-700 space-y-6">
+                <p>While tracking institutional flow on the IDX provides a significant informational advantage, the MyMantra system has distinct quantitative and structural limitations that must be acknowledged by researchers and operators.</p>
+
+                <div class="overflow-x-auto mt-8">
+                    <table class="min-w-full divide-y divide-slate-200 text-sm border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th scope="col" class="px-6 py-3 text-left font-bold text-slate-700 uppercase tracking-wider">Risk Vector</th>
+                                <th scope="col" class="px-6 py-3 text-left font-bold text-slate-700 uppercase tracking-wider">Technical Detail</th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-slate-200">
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap font-medium text-slate-900">Survivorship Bias</td>
+                                <td class="px-6 py-4 text-slate-600">Only currently listed tickers are scored. Delisted stocks are excluded from historical back-tests, potentially skewing retrospective accuracy.</td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap font-medium text-slate-900">Look-Ahead in Dev</td>
+                                <td class="px-6 py-4 text-slate-600">Scoring weights (0.40, 0.30, etc.) were established observationally based on IDX market behavior; they lack strict optimization on a held-out test set.</td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap font-medium text-slate-900">Small Float Volatility</td>
+                                <td class="px-6 py-4 text-slate-600">While LOW-float stocks score higher due to the Float Amplifier interaction term, they intrinsically carry higher liquidity risk and susceptibility to rapid manipulation.</td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap font-medium text-slate-900">Z-Score Instability</td>
+                                <td class="px-6 py-4 text-slate-600">Brokers with fewer than 20 days of transaction history are excluded. New tickers or infrequently-traded brokers yield statistically unreliable standard deviations.</td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap font-medium text-slate-900">API Data Lag</td>
+                                <td class="px-6 py-4 text-slate-600">Index Alpha data is fetched end-of-day. Intra-day algorithmic execution by institutions is not captured until market close.</td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-4 whitespace-nowrap font-medium text-slate-900">Single-Factor Risk</td>
+                                <td class="px-6 py-4 text-slate-600">The model is highly sensitive to broker behavior (40% weight). Sudden broker reclassifications invalidate historical baselines immediately.</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <h3 class="text-2xl font-bold text-slate-800 mt-12 border-t pt-8">Academic References</h3>
+                <ul class="list-disc pl-5 space-y-2 text-sm text-slate-600">
+                    <li>Wurgler, J. &amp; Zhuravskaya, E. (2002). <em>Does arbitrage flatten demand curves for stocks?</em> Journal of Business, 75(4), 583–608. (Basis for the float amplifier interaction term).</li>
+                    <li>Amihud, Y. (2002). <em>Illiquidity and stock returns: cross-section and time-series effects.</em> Journal of Financial Markets, 5(1), 31–56. (Basis for liquidity proxy logic).</li>
+                    <li>Liu, F. T., Ting, K. M., &amp; Zhou, Z.-H. (2008). <em>Isolation Forest.</em> IEEE International Conference on Data Mining.</li>
+                </ul>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+        let currentTab = 'summary';
+        let chartsInitialized = {
+            architecture: false,
+            scoring: false
+        };
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => {
+                el.classList.remove('active');
+            });
+            document.getElementById(tabId).classList.add('active');
+
+            document.querySelectorAll('.nav-item').forEach(el => {
+                if(el.dataset.target === tabId) {
+                    el.classList.add('active');
+                } else {
+                    el.classList.remove('active');
+                }
+            });
+
+            currentTab = tabId;
+            window.scrollTo(0, 0);
+
+            if (tabId === 'architecture' && !chartsInitialized.architecture) {
+                initWeightsChart();
+                chartsInitialized.architecture = true;
+            }
+            if (tabId === 'scoring' && !chartsInitialized.scoring) {
+                initFloatAmplifierChart();
+                chartsInitialized.scoring = true;
+            }
+        }
+
+        function initWeightsChart() {
+            const ctx = document.getElementById('weightsChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Broker Flow', 'Float Pressure', 'Liquidity', 'Structure'],
+                    datasets: [{
+                        data: [40, 30, 20, 10],
+                        backgroundColor: ['#3b82f6', '#10b981', '#8b5cf6', '#f59e0b'],
+                        borderWidth: 2,
+                        borderColor: '#ffffff',
+                        hoverOffset: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                font: { family: "'Inter', sans-serif", size: 12 },
+                                color: '#475569'
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return ' ' + context.label + ': ' + context.raw + '%';
+                                }
+                            }
+                        }
+                    },
+                    cutout: '65%'
+                }
+            });
+        }
+
+        function initFloatAmplifierChart() {
+            const dataPoints = [];
+            const labels = [];
+
+            for (let ff = 0.01; ff <= 0.60; ff += 0.01) {
+                labels.push((ff * 100).toFixed(0) + '%');
+
+                let amp = Math.log(1 / ff) / Math.log(20);
+                amp = Math.max(0, Math.min(1, amp));
+                dataPoints.push(amp.toFixed(3));
+            }
+
+            const ctx = document.getElementById('floatAmplifierChart').getContext('2d');
+            new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: 'Interaction Amplifier',
+                        data: dataPoints,
+                        borderColor: '#0f766e',
+                        backgroundColor: 'rgba(15, 118, 110, 0.1)',
+                        borderWidth: 3,
+                        pointRadius: 0,
+                        pointHoverRadius: 6,
+                        fill: true,
+                        tension: 0.4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                title: function(context) {
+                                    return 'Free Float: ' + context[0].label;
+                                },
+                                label: function(context) {
+                                    return 'Amplifier Multiplier: ' + context.raw;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Free Float Percentage (%)',
+                                font: { family: "'Inter', sans-serif", weight: 'bold' }
+                            },
+                            ticks: {
+                                maxTicksLimit: 12
+                            },
+                            grid: { display: false }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Amplifier Value (Max 1.0)',
+                                font: { family: "'Inter', sans-serif", weight: 'bold' }
+                            },
+                            min: 0,
+                            max: 1.1,
+                            grid: {
+                                color: '#f1f5f9'
+                            }
+                        }
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
