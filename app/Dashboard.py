@@ -495,19 +495,19 @@ with tab_scores:
             ]
             if xl_selling:
                 signal_rows.append((
-                    "Retail trend today (Stockbit / Ajaib)",
+                    "Retail trend today (Stockbit / Ajaib / Mirae)",
                     "⚡ Net selling — bullish signal",
-                    "Stockbit (XL) and/or Ajaib (XC) are net sellers today. Retail is exiting. When institutions simultaneously absorb this, it is a bullish divergence.",
+                    "Stockbit (XL), Ajaib (XC) and/or Mirae (YP) are net sellers today. Retail is exiting. When institutions simultaneously absorb this, it is a bullish divergence.",
                 ))
             if xl_buying:
                 signal_rows.append((
-                    "Retail trend today (Stockbit / Ajaib)",
+                    "Retail trend today (Stockbit / Ajaib / Mirae)",
                     "⚠️ Net buying — bearish signal",
-                    "Stockbit (XL) and/or Ajaib (XC) are net buyers today. Retail is piling in, which often signals institutions are distributing into retail demand.",
+                    "Stockbit (XL), Ajaib (XC) and/or Mirae (YP) are net buyers today. Retail is piling in, which often signals institutions are distributing into retail demand.",
                 ))
             if xl_trend and xl_days >= 3:
                 signal_rows.append((
-                    "Retail exit trend (Stockbit / Ajaib)",
+                    "Retail exit trend (Stockbit / Ajaib / Mirae)",
                     f"🚨 {xl_days} of last 10 trading days",
                     f"Retail platforms have been net sellers on {xl_days} of the last 10 days — a sustained trend, not a one-day blip. Bullish if institutions are absorbing.",
                 ))

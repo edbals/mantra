@@ -63,7 +63,12 @@ MAX_PRESENCE_BOOST = 30
 
 ADJ_XL_XC_SELLING = +15   # retail exiting → smart money absorbing → bullish
 ADJ_XL_XC_BUYING  = -15   # retail piling in → distribution → bearish
-XL_XC_TREND_DAYS  = 3     # min days of XL/XC net selling in last 10 to flag trend
+XL_XC_TREND_DAYS  = 3     # min days of retail net selling in last 10 to flag trend
+
+# Retail platform broker codes used for the "retail trend" signal.
+# XL = Stockbit, XC = Ajaib (pure retail apps).
+# YP = Mirae (retail_mixed; dominant retail base via HOTS app).
+RETAIL_PLATFORMS = ("XL", "XC", "YP")
 
 # z-score threshold to consider a broker "buying above average"
 Z_THRESH        = 1.5
@@ -139,20 +144,21 @@ def _compute_streak(ticker: str, scoring_date: str, client: "IndexAlphaClient", 
 
 def _compute_xl_xc_trend(ticker: str, scoring_date: str, client: "IndexAlphaClient") -> tuple[int, bool]:
     """
-    Returns (selling_days, trend_flag) for XL/XC over the last 10 trading days.
-    selling_days = count of days where XL or XC was net selling.
-    trend_flag   = True if selling_days >= XL_XC_TREND_DAYS.
+    Returns (selling_days, trend_flag) for retail platforms (XL/XC/YP) over
+    the last 10 trading days. selling_days = days the combined retail net
+    was negative. trend_flag = True if selling_days >= XL_XC_TREND_DAYS.
     """
+    placeholders = ",".join("?" * len(RETAIL_PLATFORMS))
     con = client._connect()
     df = pd.read_sql_query(
-        """
+        f"""
         SELECT date, broker_code, buy_volume, sell_volume
         FROM broker_transactions
         WHERE ticker=? AND investor_type='all'
-          AND broker_code IN ('XL','XC') AND date <= ?
-        ORDER BY date DESC LIMIT 100
+          AND broker_code IN ({placeholders}) AND date <= ?
+        ORDER BY date DESC LIMIT 200
         """,
-        con, params=(ticker, scoring_date),
+        con, params=(ticker, *RETAIL_PLATFORMS, scoring_date),
     )
     con.close()
     if df.empty:
@@ -294,17 +300,17 @@ def score_ticker(
         presence_boost += CLASS_BOOST.get(cls, 0)
     adj += min(presence_boost, MAX_PRESENCE_BOOST)
 
-    # XL/XC selling = bullish (retail exiting, smart money absorbing)
-    xl_xc_selling = bool({"XL", "XC"} & seller_codes)
+    # Retail platform selling = bullish (retail exiting, smart money absorbing)
+    xl_xc_selling = bool(set(RETAIL_PLATFORMS) & seller_codes)
     if xl_xc_selling:
         adj += ADJ_XL_XC_SELLING  # +15
 
-    # XL/XC buying = bearish (retail piling in, smart money distributing)
-    xl_xc_buying = bool({"XL", "XC"} & top3_buyer_codes)
+    # Retail platform buying = bearish (retail piling in, smart money distributing)
+    xl_xc_buying = bool(set(RETAIL_PLATFORMS) & top3_buyer_codes)
     if xl_xc_buying:
         adj += ADJ_XL_XC_BUYING   # -15
 
-    # XL/XC trend: how many of last 10 days were they net selling?
+    # Retail trend: how many of last 10 days were retail platforms net selling?
     xl_xc_trend_days, xl_xc_trend_selling = _compute_xl_xc_trend(ticker, scoring_date, client)
 
     final_score = float(np.clip(base_score + adj, 0.0, 100.0))
