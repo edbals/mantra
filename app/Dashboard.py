@@ -23,6 +23,7 @@ from app.cache import (
     cached_ticker_flow,
     cached_ticker_history,
     ensure_today_scored,
+    latest_idx_trading_date,
 )
 
 CONFIG_PATH = str(Path(__file__).parent.parent / "config.json")
@@ -250,6 +251,22 @@ with _auto_placeholder.container():
         except Exception as _e:
             st.warning(f"Auto-scoring skipped: {_e}")
 _auto_placeholder.empty()
+
+# ── Stale-data banner ─────────────────────────────────────────────────────────
+# IDX trades Mon-Fri; on a normal weekday after market close the DB should
+# contain T or T-1. Anything older means the daily refresh job didn't run
+# (see scripts/SETUP_VPS_REFRESH.md).
+_latest_db_date = latest_idx_trading_date(CONFIG_PATH)
+if _latest_db_date:
+    _today = pd.Timestamp.now(tz="Asia/Jakarta").normalize().tz_localize(None)
+    _latest_ts = pd.Timestamp(_latest_db_date)
+    _business_gap = len(pd.bdate_range(_latest_ts, _today)) - 1  # exclude latest itself
+    if _business_gap >= 2:
+        st.warning(
+            f"⚠️ Data is stale — latest IDX trading day in the DB is **{_latest_db_date}** "
+            f"({_business_gap} business days behind). The daily refresh job hasn't run. "
+            f"On the host: `./scripts/daily_refresh.sh` (see `scripts/SETUP_VPS_REFRESH.md`)."
+        )
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:

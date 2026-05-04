@@ -89,6 +89,32 @@ def cached_ticker_flow(ticker: str, config_path: str, days: int = 30) -> pd.Data
     return df.drop(columns=["date_ms"])
 
 
+@st.cache_data(ttl=600)
+def latest_idx_trading_date(config_path: str) -> str | None:
+    """Most recent date present in the IDX-API stock_summary table.
+
+    Used by the dashboard to surface a stale-data warning when the daily
+    refresh job hasn't run. Returns YYYY-MM-DD or None if the DB is empty
+    or unreachable.
+    """
+    cfg = Config.load(config_path)
+    if not cfg.idxdb_path.exists():
+        return None
+    con = sqlite3.connect(str(cfg.idxdb_path), check_same_thread=False)
+    try:
+        row = con.execute("SELECT MAX(date) FROM stock_summary").fetchone()
+    finally:
+        con.close()
+    if not row or row[0] is None:
+        return None
+    return (
+        pd.to_datetime(row[0], unit="ms", utc=True)
+        .tz_convert(None)
+        .normalize()
+        .strftime("%Y-%m-%d")
+    )
+
+
 @st.cache_data(ttl=3600)
 def ensure_today_scored(config_path: str) -> str:
     """

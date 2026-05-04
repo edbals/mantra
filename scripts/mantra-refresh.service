@@ -1,0 +1,22 @@
+[Unit]
+Description=Mantra daily IDX data refresh + screener run
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Edit these to match your VPS layout:
+User=mantra
+Group=mantra
+WorkingDirectory=/opt/mantra
+Environment=MANTRA_DIR=/opt/mantra
+Environment=IDX_API_DIR=/opt/IDX-API
+Environment=PYTHON_BIN=/opt/mantra/.venv/bin/python3
+Environment=DENO_BIN=/usr/local/bin/deno
+ExecStart=/opt/mantra/scripts/daily_refresh.sh
+StandardOutput=append:/var/log/mantra-refresh.log
+StandardError=append:/var/log/mantra-refresh.log
+TimeoutStartSec=15min
+
+[Install]
+WantedBy=multi-user.target

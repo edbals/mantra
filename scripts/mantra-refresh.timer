@@ -1,0 +1,14 @@
+[Unit]
+Description=Run mantra-refresh.service Mon-Fri after IDX market close
+
+[Timer]
+# IDX closes ~16:00 WIB (Asia/Jakarta = UTC+7).
+# 17:30 WIB = 10:30 UTC — gives the upstream API time to publish T-day data.
+OnCalendar=Mon..Fri *-*-* 10:30:00 UTC
+# Catch up if the VPS was off when the timer should have fired.
+Persistent=true
+# Spread load if multiple services share the timer.
+RandomizedDelaySec=2min
+
+[Install]
+WantedBy=timers.target
