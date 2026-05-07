@@ -296,6 +296,14 @@ with st.sidebar:
     st.divider()
 
     min_invest = st.slider("Min Investment Score", 0, 100, 0)
+    min_adv_b = st.slider(
+        "Min Avg Daily Value (IDR billion)",
+        min_value=0.0,
+        max_value=50.0,
+        value=0.0,
+        step=0.5,
+        help="Filter out illiquid tickers. 1 = 1 billion IDR average daily traded value.",
+    )
     only_breakout = st.checkbox("Breakout signals only", value=False)
     selected_actions = ["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID"]
 
@@ -311,6 +319,8 @@ mask = (
     df["action"].isin(selected_actions)
     & (df["investment_score"] >= min_invest)
 )
+if min_adv_b > 0 and "avg_daily_value_idr" in df.columns:
+    mask = mask & (df["avg_daily_value_idr"].fillna(0) >= min_adv_b * 1e9)
 if stage2_only:
     mask = mask & (df["broker_data_source"] == "indexalpha")
 if only_breakout and "breakout_signal" in df.columns:
