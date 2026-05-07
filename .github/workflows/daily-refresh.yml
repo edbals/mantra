@@ -1,0 +1,100 @@
+name: Daily IDX refresh
+
+on:
+  schedule:
+    # 11:00 UTC = 18:00 WIB (Asia/Jakarta), ~2h after IDX market close.
+    # GitHub cron is in UTC and may run a few minutes late under load.
+    - cron: '0 11 * * 1-5'
+  workflow_dispatch: {}        # allow manual runs from the Actions tab
+
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Smoke-test idx.co.id reachability
+        # If this fails with HTTP 403, GitHub's IPs are blocked by Cloudflare
+        # and we need to switch to Option F (Cloudflare Worker proxy).
+        run: |
+          set -e
+          status=$(curl -s -o /tmp/probe.html -w "%{http_code}" \
+            -A "Mozilla/5.0" \
+            "https://www.idx.co.id/primary/TradingSummary/GetStockSummary?date=20260430")
+          echo "idx.co.id returned HTTP $status"
+          if [ "$status" != "200" ]; then
+            echo "::error::Cloudflare is blocking GitHub Actions IPs. Switch to Option F."
+            head -c 500 /tmp/probe.html || true
+            exit 1
+          fi
+          # Sanity: did we get JSON with non-empty data?
+          python3 -c "import json,sys; d=json.load(open('/tmp/probe.html')); n=len(d.get('data',[])); print('records:',n); sys.exit(0 if n>0 else 1)"
+
+      - name: Install Deno
+        uses: denoland/setup-deno@v1
+        with:
+          deno-version: v2.x
+
+      - name: Check out IDX-API (sync source)
+        uses: actions/checkout@v4
+        with:
+          repository: NeaByteLab/IDX-API
+          path: IDX-API
+
+      - name: Configure SSH to VPS
+        env:
+          SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts 2>/dev/null
+
+      - name: Pull current SQLite from VPS
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p IDX-API/data
+          rsync -az "$VPS_USER@$VPS_HOST:/root/IDX-API/data/database.sqlite" IDX-API/data/database.sqlite
+          ls -la IDX-API/data/database.sqlite
+
+      - name: Sync last 7 days from idx.co.id
+        working-directory: IDX-API
+        run: |
+          deno run -A DailyCron.ts
+
+      - name: Push updated SQLite back to VPS
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          # Stop streamlit, swap DB atomically, restart, then run scoring.
+          ssh "$VPS_USER@$VPS_HOST" 'systemctl stop mantra.service'
+          rsync -az IDX-API/data/database.sqlite "$VPS_USER@$VPS_HOST:/root/IDX-API/data/database.sqlite.new"
+          ssh "$VPS_USER@$VPS_HOST" '
+            mv /root/IDX-API/data/database.sqlite /root/IDX-API/data/database.sqlite.bak.$(date +%Y%m%d_%H%M%S)
+            mv /root/IDX-API/data/database.sqlite.new /root/IDX-API/data/database.sqlite
+            cd /root/mantra && /usr/bin/python3 main.py --incremental
+            systemctl start mantra.service
+          '
+
+      - name: Verify dashboard is up + reporting fresh date
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          ssh "$VPS_USER@$VPS_HOST" '
+            systemctl is-active mantra.service
+            python3 -c "
+          import sqlite3
+          from datetime import datetime, timezone
+          con = sqlite3.connect(\"/root/IDX-API/data/database.sqlite\")
+          ms = con.execute(\"SELECT MAX(date) FROM stock_summary\").fetchone()[0]
+          print(\"latest IDX trading day in DB:\", datetime.fromtimestamp(ms/1000, tz=timezone.utc).strftime(\"%Y-%m-%d\"))
+          "
+          '
