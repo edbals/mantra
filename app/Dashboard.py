@@ -47,8 +47,8 @@ ACTION_COLORS = {k: v[1] for k, v in ACTION_PILL.items()}
 st.set_page_config(
     page_title="Mantra",
     page_icon=":material/candlestick_chart:",
-    layout="wide",
-    initial_sidebar_state="expanded",
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
 # ── Mode state ────────────────────────────────────────────────────────────────
@@ -76,134 +76,234 @@ T = _DARK_VARS if _DARK else _LIGHT_VARS
 
 st.markdown(f"""
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
 
-  :root {{
-    --m-page: {T['page']};
-    --m-card: {T['card']};
-    --m-text: {T['text']};
-    --m-muted: {T['muted']};
-    --m-border: {T['border']};
-    --m-track: {T['track']};
-    --m-row-hover: {T['row_hover']};
-  }}
-
-  html, body, [class*="css"], [data-testid="stAppViewContainer"] *,
-  [data-testid="stSidebar"] * {{
+  html, body, [class*="css"], [data-testid="stAppViewContainer"] * {{
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
   }}
 
   [data-testid="stAppViewContainer"] {{
     background-color: {T['page']} !important;
   }}
-  [data-testid="stSidebar"] {{
-    background-color: {T['card']} !important;
-    border-right: 1px solid {T['border']} !important;
+
+  /* Kill the sidebar entirely — no rail, no hamburger, no nothing */
+  [data-testid="stSidebar"],
+  [data-testid="stSidebarCollapsedControl"],
+  [data-testid="stSidebarCollapseButton"],
+  button[kind="header"][aria-label*="idebar"] {{
+    display: none !important;
   }}
-  [data-testid="stSidebar"] *,
+
+  /* Hide ALL Streamlit chrome */
+  #MainMenu, footer, header,
+  [data-testid="stToolbar"], [data-testid="stDecoration"],
+  [data-testid="stStatusWidget"] {{
+    display: none !important;
+    visibility: hidden !important;
+  }}
+
+  /* Wide centered editorial column */
+  .main .block-container {{
+    max-width: 1080px !important;
+    padding: 64px 48px 120px 48px !important;
+  }}
+
+  /* Body text colors */
   [data-testid="stAppViewContainer"] p,
   [data-testid="stAppViewContainer"] span,
   [data-testid="stAppViewContainer"] li,
-  [data-testid="stAppViewContainer"] label {{
+  [data-testid="stAppViewContainer"] label,
+  [data-testid="stMarkdownContainer"] p {{
     color: {T['text']};
+    font-size: 16px;
+    line-height: 1.65;
   }}
-  h1, h2, h3, h4 {{
+
+  /* Editorial headlines — Ramp-grade scale */
+  h1 {{
+    font-size: 88px !important;
+    line-height: 0.96 !important;
+    letter-spacing: -0.045em !important;
+    font-weight: 700 !important;
     color: {T['text']} !important;
-    letter-spacing: -0.025em;
-    font-weight: 600;
+    margin: 0 !important;
   }}
-  h1 {{ letter-spacing: -0.03em; font-weight: 700; }}
+  h2 {{
+    font-size: 40px !important;
+    line-height: 1.05 !important;
+    letter-spacing: -0.03em !important;
+    font-weight: 600 !important;
+    color: {T['text']} !important;
+    margin: 0 0 16px 0 !important;
+  }}
+  h3 {{
+    font-size: 22px !important;
+    letter-spacing: -0.02em !important;
+    font-weight: 600 !important;
+    color: {T['text']} !important;
+  }}
+  h4 {{
+    font-size: 16px !important;
+    letter-spacing: -0.01em !important;
+    font-weight: 600 !important;
+    color: {T['text']} !important;
+  }}
 
-  /* Hide Streamlit chrome */
-  #MainMenu, footer, header {{ visibility: hidden; }}
-
-  /* Caption styling — used for Level-1 labels */
-  [data-testid="stCaptionContainer"], .m-eyebrow {{
+  /* Eyebrow label — small uppercase tracked label above headlines */
+  .m-eyebrow {{
     color: {T['muted']} !important;
     font-size: 11px !important;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 500;
+    text-transform: uppercase !important;
+    letter-spacing: 0.12em !important;
+    font-weight: 500 !important;
+    margin: 0 0 14px 0 !important;
+    display: block;
   }}
 
-  /* Ramp-style stat */
-  .m-stat {{ padding: 16px 0 8px 0; }}
+  /* Caption styling */
+  [data-testid="stCaptionContainer"] {{
+    color: {T['muted']} !important;
+    font-size: 13px !important;
+  }}
+
+  /* Big stat — Ramp's signature display number */
+  .m-stat {{ padding: 0; margin: 24px 0; }}
   .m-stat .label {{
-    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
-    color: {T['muted']}; margin-bottom: 6px; font-weight: 500;
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.12em;
+    color: {T['muted']}; margin-bottom: 10px; font-weight: 500;
   }}
   .m-stat .num {{
-    font-size: 56px; font-weight: 700; color: {T['text']};
-    line-height: 1; letter-spacing: -0.04em; margin: 0;
+    font-size: 72px; font-weight: 700; color: {T['text']};
+    line-height: 0.96; letter-spacing: -0.045em; margin: 0;
     font-variant-numeric: tabular-nums;
   }}
-  .m-stat .num.small {{ font-size: 32px; }}
-  .m-stat .sub {{ font-size: 13px; color: {T['muted']}; margin-top: 6px; }}
+  .m-stat .num.small {{ font-size: 40px; letter-spacing: -0.035em; }}
+  .m-stat .sub {{ font-size: 13px; color: {T['muted']}; margin-top: 8px; }}
 
-  /* Decision label pills */
+  /* Pill — fully rounded soft-pastel decision label */
   .m-pill {{
-    display: inline-block; padding: 3px 10px; border-radius: 99px;
+    display: inline-block; padding: 4px 12px; border-radius: 99px;
     font-size: 12px; font-weight: 500; letter-spacing: 0.01em;
-    line-height: 1.4;
+    line-height: 1.5;
   }}
 
-  /* Card shell */
+  /* Cards */
   .m-card {{
     background-color: {T['card']};
     border: 1px solid {T['border']};
-    border-radius: 12px;
-    padding: 24px 28px;
-    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-    margin-bottom: 16px;
+    border-radius: 16px;
+    padding: 32px 36px;
+    margin: 24px 0;
   }}
 
-  /* Sub-score row (bar + label) */
-  .m-sub-row {{ margin: 10px 0; }}
+  /* Sub-score row */
+  .m-sub-row {{ margin: 16px 0; }}
   .m-sub-label {{
     display: flex; justify-content: space-between; align-items: baseline;
-    font-size: 13px; color: {T['text']}; margin-bottom: 4px;
+    font-size: 14px; color: {T['text']}; margin-bottom: 6px;
   }}
-  .m-sub-label .weight {{ color: {T['muted']}; font-size: 11px; margin-left: 6px; }}
-  .m-sub-label b {{ font-variant-numeric: tabular-nums; font-weight: 600; }}
+  .m-sub-label .weight {{ color: {T['muted']}; font-size: 11px; margin-left: 8px; }}
+  .m-sub-label b {{ font-variant-numeric: tabular-nums; font-weight: 600; font-size: 14px; }}
   .m-bar-track {{
-    background: {T['track']}; border-radius: 99px; height: 6px; overflow: hidden;
+    background: {T['track']}; border-radius: 99px; height: 4px; overflow: hidden;
   }}
-  .m-bar-fill {{ height: 6px; border-radius: 99px; }}
+  .m-bar-fill {{ height: 4px; border-radius: 99px; }}
 
   /* Concentration gauge */
   .m-gauge-wrap {{
-    background: {T['track']}; border-radius: 99px; height: 10px;
-    overflow: hidden; position: relative; margin: 10px 0 6px 0;
+    background: {T['track']}; border-radius: 99px; height: 8px;
+    overflow: hidden; position: relative; margin: 14px 0 8px 0;
   }}
   .m-gauge-sell {{ position: absolute; left: 0;  top: 0; height: 100%; background: #DC2626; }}
   .m-gauge-buy  {{ position: absolute; right: 0; top: 0; height: 100%; background: #16A34A; }}
 
-  /* Tables: lighter feel */
+  /* Tables — minimal, no aggressive borders */
   div[data-testid="stDataFrame"] {{
-    border-radius: 12px; overflow: hidden;
+    border-radius: 14px; overflow: hidden;
     border: 1px solid {T['border']};
+    background: {T['card']};
   }}
   div[data-testid="stDataFrame"] thead tr th {{
     background-color: {T['card']} !important;
     color: {T['muted']} !important;
-    text-transform: uppercase; font-size: 11px !important;
-    letter-spacing: 0.05em; font-weight: 500 !important;
+    text-transform: uppercase; font-size: 10px !important;
+    letter-spacing: 0.1em; font-weight: 500 !important;
     border-bottom: 1px solid {T['border']} !important;
+    padding: 14px 12px !important;
+  }}
+  div[data-testid="stDataFrame"] tbody tr td {{
+    border-bottom: 1px solid {T['border']} !important;
+    padding: 14px 12px !important;
   }}
 
-  /* Onboarding card */
-  .m-onboard {{
-    background-color: {T['card']}; border: 1px solid {T['border']};
-    border-radius: 14px; padding: 32px 36px; margin: 16px 0 24px 0;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.06);
-  }}
-  .m-onboard h2 {{ font-size: 28px; margin: 0 0 12px 0; }}
-  .m-onboard p {{ font-size: 15px; color: {T['text']}; line-height: 1.65; margin: 8px 0; }}
-
-  /* Inputs */
-  [data-baseweb="input"] input, .stSelectbox > div > div {{
+  /* Inputs — minimal */
+  [data-baseweb="input"] input,
+  [data-baseweb="select"] > div,
+  .stSelectbox > div > div,
+  .stDateInput > div > div {{
     background-color: {T['card']} !important;
-    border-color: {T['border']} !important;
+    border: 1px solid {T['border']} !important;
+    border-radius: 8px !important;
+  }}
+  .stSlider [data-baseweb="slider"] {{ padding-top: 8px; }}
+
+  /* Hide subtle Streamlit form widget labels' default font weight */
+  .stSlider label, .stCheckbox label, .stSelectbox label,
+  .stDateInput label, .stRadio label, .stTextInput label {{
+    font-size: 11px !important;
+    text-transform: uppercase !important;
+    letter-spacing: 0.12em !important;
+    color: {T['muted']} !important;
+    font-weight: 500 !important;
+  }}
+
+  /* Buttons */
+  .stButton > button, .stLinkButton > a {{
+    border-radius: 99px !important;
+    border: 1px solid {T['border']} !important;
+    background: {T['card']} !important;
+    color: {T['text']} !important;
+    font-weight: 500 !important;
+    padding: 10px 20px !important;
+    font-size: 14px !important;
+  }}
+  .stButton > button:hover, .stLinkButton > a:hover {{
+    border-color: {T['text']} !important;
+  }}
+
+  /* Tabs */
+  .stTabs [data-baseweb="tab-list"] {{
+    gap: 32px; border-bottom: 1px solid {T['border']};
+  }}
+  .stTabs [data-baseweb="tab"] {{
+    padding: 12px 0 !important;
+    color: {T['muted']} !important;
+    font-size: 14px !important;
+    font-weight: 500 !important;
+  }}
+  .stTabs [data-baseweb="tab"][aria-selected="true"] {{
+    color: {T['text']} !important;
+    border-bottom: 2px solid {T['text']} !important;
+  }}
+
+  /* Onboarding card — full editorial */
+  .m-onboard {{
+    background: transparent;
+    margin: 32px 0 56px 0;
+  }}
+  .m-onboard p {{ font-size: 17px; color: {T['text']}; line-height: 1.7; margin: 16px 0; }}
+
+  /* Top toolbar (logo + utility links + dark-mode toggle) */
+  .m-topbar {{
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 0 0 80px 0; border: 0;
+  }}
+  .m-topbar .logo {{
+    font-size: 18px; font-weight: 600; letter-spacing: -0.01em;
+    color: {T['text']};
+  }}
+  .m-topbar .links {{
+    display: flex; gap: 28px; font-size: 14px; color: {T['muted']};
   }}
 </style>
 """, unsafe_allow_html=True)
@@ -444,58 +544,79 @@ if _latest_db_date:
             f"On the host: `./scripts/daily_refresh.sh` (see `scripts/SETUP_VPS_REFRESH.md`)."
         )
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-with st.sidebar:
+# ── Top toolbar (logo · dark-mode toggle · "How this works") ──────────────────
+_tb_a, _tb_b, _tb_c = st.columns([4, 1, 1])
+with _tb_a:
     st.markdown(
-        f"<div style='font-size:22px;font-weight:700;letter-spacing:-0.02em;"
-        f"margin:4px 0 2px 0;color:{M_TEXT}'>Mantra</div>"
-        f"<div style='color:{M_MUTED};font-size:12px;margin-bottom:18px;line-height:1.5'>"
-        f"Broker-flow screener for the Indonesian stock market.</div>",
+        f"<div style='font-size:17px;font-weight:600;letter-spacing:-0.01em;"
+        f"color:{M_TEXT};padding-top:8px'>Mantra</div>",
         unsafe_allow_html=True,
     )
+with _tb_b:
+    if st.button("How this works", key="reset_onboard", use_container_width=True):
+        st.session_state.onboarding_done = False
+        st.rerun()
+with _tb_c:
+    st.toggle("Dark mode", key="dark_mode")
 
-    available_dates = cached_available_dates(CONFIG_PATH)
-    if not available_dates:
-        st.error("No scored dates found — check your IDX database path in config.json.")
-        st.stop()
+st.markdown("<div style='height:64px'></div>", unsafe_allow_html=True)
 
-    # Calendar picker constrained to dates we actually have scores for
-    _date_objs = [pd.to_datetime(d).date() for d in available_dates]
+
+# ── Hero ──────────────────────────────────────────────────────────────────────
+available_dates = cached_available_dates(CONFIG_PATH)
+if not available_dates:
+    st.error("No scored dates found — check your IDX database path in config.json.")
+    st.stop()
+_default_date = pd.to_datetime(available_dates[0]).date()
+_hero_date = st.session_state.get("flt_date", _default_date)
+
+st.markdown(
+    f"<p class='m-eyebrow'>IDX Screener &nbsp;·&nbsp; {_hero_date}</p>"
+    f"<h1>Find where institutions<br>are quietly buying.</h1>"
+    f"<p style='font-size:19px;color:{M_MUTED};margin:28px 0 0 0;max-width:640px;"
+    f"line-height:1.6'>"
+    f"Mantra scans every IDX stock daily, reads broker transaction flow, and "
+    f"identifies where institutional capital is accumulating — before price "
+    f"confirms the move."
+    f"</p>",
+    unsafe_allow_html=True,
+)
+
+st.markdown("<div style='height:80px'></div>", unsafe_allow_html=True)
+
+
+# ── Filter bar (all controls live here, no sidebar) ───────────────────────────
+_date_objs = [pd.to_datetime(d).date() for d in available_dates]
+
+_fa, _fb, _fc, _fd = st.columns([2, 2, 2, 1])
+with _fa:
     _picked = st.date_input(
-        "Scoring date",
+        "Date",
         value=_date_objs[0],
         min_value=min(_date_objs),
         max_value=max(_date_objs),
         format="YYYY-MM-DD",
+        key="flt_date",
     )
-    if str(_picked) not in available_dates:
-        # Fallback to nearest available date
-        _picked = min(_date_objs, key=lambda d: abs(d - _picked))
-        st.caption(f"No data for selected date — showing closest: {_picked}")
-    selected_date = str(_picked)
-
-    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
-
-    min_invest = st.slider("Min investment score", 0, 100, 0)
+with _fb:
+    min_invest = st.slider("Min score", 0, 100, 0, key="flt_score")
+with _fc:
     min_adv_b = st.slider(
-        "Min avg daily value (IDR billion)",
-        min_value=0.0,
-        max_value=50.0,
-        value=0.0,
-        step=0.5,
-        help="Filter out illiquid tickers. 1 = 1 billion IDR average daily traded value.",
+        "Min avg daily value (IDR B)",
+        0.0, 50.0, 0.0, 0.5,
+        key="flt_adv",
+        help="Filter out illiquid tickers. 1 = 1 billion IDR avg daily traded value.",
     )
-    only_breakout = st.checkbox("Breakout signals only", value=False)
-    selected_actions = ["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID"]
+with _fd:
+    only_breakout = st.checkbox("Breakouts only", value=False, key="flt_breakout")
 
-    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+if str(_picked) not in available_dates:
+    _picked = min(_date_objs, key=lambda d: abs(d - _picked))
+    st.caption(f"No data for selected date — showing closest: {_picked}")
+selected_date = str(_picked)
+selected_actions = ["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID"]
 
-    # Dark mode toggle (drives the CSS injection at the top of this script).
-    st.toggle(":material/dark_mode: Dark mode", key="dark_mode")
-
-    if st.button(":material/help: How this works", use_container_width=True):
-        st.session_state.onboarding_done = False
-        st.rerun()
+st.markdown("<div style='height:64px'></div>", unsafe_allow_html=True)
 
 
 # ── Load & filter data ────────────────────────────────────────────────────────
@@ -518,24 +639,15 @@ if only_breakout and "breakout_signal" in df.columns:
 filtered = df[mask].copy().reset_index(drop=True)
 
 
-# ── Header row ────────────────────────────────────────────────────────────────
-st.markdown(
-    f"<p class='m-eyebrow' style='color:{M_MUTED};font-size:11px;text-transform:uppercase;"
-    f"letter-spacing:0.08em;margin:4px 0 6px 0'>IDX Screener · {selected_date}</p>"
-    f"<h1 style='font-size:44px;margin:0 0 4px 0;font-weight:700;letter-spacing:-0.03em'>Mantra</h1>"
-    f"<p style='color:{M_MUTED};font-size:15px;margin:0 0 28px 0'>"
-    f"{len(df):,} tickers scored · {len(filtered):,} match the current filters</p>",
-    unsafe_allow_html=True,
-)
-
-
 # ── Rankings table ────────────────────────────────────────────────────────────
 st.markdown(
-    f"<p class='m-eyebrow' style='color:{M_MUTED};font-size:11px;text-transform:uppercase;"
-    f"letter-spacing:0.08em;margin:0 0 4px 0'>Rankings</p>"
-    f"<h3 style='font-size:22px;margin:0 0 4px 0'>Top 100 by broker signal strength</h3>"
-    f"<p style='color:{M_MUTED};font-size:13px;margin:0 0 16px 0'>"
-    f"Validated with real broker flow data and Isolation Forest anomaly detection.</p>",
+    f"<p class='m-eyebrow'>Rankings</p>"
+    f"<h2>Top 100 by broker signal strength</h2>"
+    f"<p style='color:{M_MUTED};font-size:15px;margin:0 0 28px 0;max-width:640px;line-height:1.6'>"
+    f"Validated with real broker flow data and Isolation Forest anomaly detection. "
+    f"Both methods must flag the same broker on the same day. "
+    f"<b style='color:{M_TEXT}'>{len(df):,}</b> tickers scored, "
+    f"<b style='color:{M_TEXT}'>{len(filtered):,}</b> match the filters above.</p>",
     unsafe_allow_html=True,
 )
 
