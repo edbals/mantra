@@ -28,72 +28,192 @@ from app.cache import (
 
 CONFIG_PATH = str(Path(__file__).parent.parent / "config.json")
 
-# ── Design constants ──────────────────────────────────────────────────────────
-ACTION_COLORS = {
-    "INVEST":     "#00C853",
-    "WATCH_EXEC": "#D4E600",
-    "WATCH":      "#FFB300",
-    "OBSERVE":    "#FF6D00",
-    "AVOID":      "#FF1744",
-    "ILLIQUID":   "#78909C",
+# ── Design tokens ─────────────────────────────────────────────────────────────
+# Decision-label pill palette: (background, text). Same hues across modes; the
+# 10-12% opacity background reads correctly on both light and dark surfaces.
+ACTION_PILL = {
+    "INVEST":     ("#D1FAE5", "#065F46"),
+    "WATCH_EXEC": ("#FEF9C3", "#854D0E"),
+    "WATCH":      ("#FEF3C7", "#92400E"),
+    "OBSERVE":    ("#FFEDD5", "#9A3412"),
+    "AVOID":      ("#FEE2E2", "#991B1B"),
+    "ILLIQUID":   ("#F3F4F6", "#374151"),
 }
+
+# Single accent per action used for chart colors / outlines (mode-agnostic).
+ACTION_COLORS = {k: v[1] for k, v in ACTION_PILL.items()}
 
 # ── Page setup ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="MyMantra | IDX Screener",
-    page_icon="📈",
+    page_title="Mantra",
+    page_icon=":material/candlestick_chart:",
     layout="wide",
     initial_sidebar_state="expanded",
 )
 
-st.markdown("""
+# ── Mode state ────────────────────────────────────────────────────────────────
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = False
+if "onboarding_done" not in st.session_state:
+    st.session_state.onboarding_done = False
+
+_DARK = st.session_state.dark_mode
+
+# ── Global theme + typography ─────────────────────────────────────────────────
+# CSS variables driven off the toggle. Colors are kept on `:root` so Altair-free
+# inline styles can also reference them (we expose them via Python below too).
+_LIGHT_VARS = {
+    "page": "#F2EDE6", "card": "#FFFFFF",
+    "text": "#0C0B09", "muted": "#8A8276", "border": "#E8E2DA",
+    "track": "#F5F0EB", "row_hover": "#FAF7F3",
+}
+_DARK_VARS = {
+    "page": "#0C0B09", "card": "#161412",
+    "text": "#F7F3EE", "muted": "#9A9189", "border": "#2A2723",
+    "track": "#1F1C19", "row_hover": "#1A1815",
+}
+T = _DARK_VARS if _DARK else _LIGHT_VARS
+
+st.markdown(f"""
 <style>
-  /* Use Streamlit default fonts — overriding broke Material Symbols icons. */
-  .ticker-header {
-    background: #1A1D27;
-    border-radius: 10px;
-    padding: 16px 24px;
-    margin-bottom: 12px;
-  }
-  .badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 5px;
-    font-weight: 700;
-    font-size: 0.78rem;
-    letter-spacing: 0.5px;
-  }
-  .signal-box {
-    border-radius: 8px;
-    padding: 14px 18px;
-    margin-bottom: 8px;
-  }
-  .subscore-row { margin: 7px 0; }
-  .subscore-label {
-    display: flex;
-    justify-content: space-between;
-    font-size: 0.84rem;
-    margin-bottom: 3px;
-  }
-  .bar-track {
-    background: #2D3140;
-    border-radius: 4px;
-    height: 8px;
-    overflow: hidden;
-  }
-  .bar-fill { height: 8px; border-radius: 4px; }
-  .conc-wrap {
-    background: #2D3140;
-    border-radius: 6px;
-    height: 14px;
-    overflow: hidden;
-    position: relative;
-    margin: 8px 0 4px 0;
-  }
-  .conc-sell { position: absolute; left: 0;  top: 0; height: 100%; background: #FF1744; }
-  .conc-buy  { position: absolute; right: 0; top: 0; height: 100%; background: #00C853; }
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+  :root {{
+    --m-page: {T['page']};
+    --m-card: {T['card']};
+    --m-text: {T['text']};
+    --m-muted: {T['muted']};
+    --m-border: {T['border']};
+    --m-track: {T['track']};
+    --m-row-hover: {T['row_hover']};
+  }}
+
+  html, body, [class*="css"], [data-testid="stAppViewContainer"] *,
+  [data-testid="stSidebar"] * {{
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  }}
+
+  [data-testid="stAppViewContainer"] {{
+    background-color: {T['page']} !important;
+  }}
+  [data-testid="stSidebar"] {{
+    background-color: {T['card']} !important;
+    border-right: 1px solid {T['border']} !important;
+  }}
+  [data-testid="stSidebar"] *,
+  [data-testid="stAppViewContainer"] p,
+  [data-testid="stAppViewContainer"] span,
+  [data-testid="stAppViewContainer"] li,
+  [data-testid="stAppViewContainer"] label {{
+    color: {T['text']};
+  }}
+  h1, h2, h3, h4 {{
+    color: {T['text']} !important;
+    letter-spacing: -0.025em;
+    font-weight: 600;
+  }}
+  h1 {{ letter-spacing: -0.03em; font-weight: 700; }}
+
+  /* Hide Streamlit chrome */
+  #MainMenu, footer, header {{ visibility: hidden; }}
+
+  /* Caption styling — used for Level-1 labels */
+  [data-testid="stCaptionContainer"], .m-eyebrow {{
+    color: {T['muted']} !important;
+    font-size: 11px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 500;
+  }}
+
+  /* Ramp-style stat */
+  .m-stat {{ padding: 16px 0 8px 0; }}
+  .m-stat .label {{
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: {T['muted']}; margin-bottom: 6px; font-weight: 500;
+  }}
+  .m-stat .num {{
+    font-size: 56px; font-weight: 700; color: {T['text']};
+    line-height: 1; letter-spacing: -0.04em; margin: 0;
+    font-variant-numeric: tabular-nums;
+  }}
+  .m-stat .num.small {{ font-size: 32px; }}
+  .m-stat .sub {{ font-size: 13px; color: {T['muted']}; margin-top: 6px; }}
+
+  /* Decision label pills */
+  .m-pill {{
+    display: inline-block; padding: 3px 10px; border-radius: 99px;
+    font-size: 12px; font-weight: 500; letter-spacing: 0.01em;
+    line-height: 1.4;
+  }}
+
+  /* Card shell */
+  .m-card {{
+    background-color: {T['card']};
+    border: 1px solid {T['border']};
+    border-radius: 12px;
+    padding: 24px 28px;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+    margin-bottom: 16px;
+  }}
+
+  /* Sub-score row (bar + label) */
+  .m-sub-row {{ margin: 10px 0; }}
+  .m-sub-label {{
+    display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 13px; color: {T['text']}; margin-bottom: 4px;
+  }}
+  .m-sub-label .weight {{ color: {T['muted']}; font-size: 11px; margin-left: 6px; }}
+  .m-sub-label b {{ font-variant-numeric: tabular-nums; font-weight: 600; }}
+  .m-bar-track {{
+    background: {T['track']}; border-radius: 99px; height: 6px; overflow: hidden;
+  }}
+  .m-bar-fill {{ height: 6px; border-radius: 99px; }}
+
+  /* Concentration gauge */
+  .m-gauge-wrap {{
+    background: {T['track']}; border-radius: 99px; height: 10px;
+    overflow: hidden; position: relative; margin: 10px 0 6px 0;
+  }}
+  .m-gauge-sell {{ position: absolute; left: 0;  top: 0; height: 100%; background: #DC2626; }}
+  .m-gauge-buy  {{ position: absolute; right: 0; top: 0; height: 100%; background: #16A34A; }}
+
+  /* Tables: lighter feel */
+  div[data-testid="stDataFrame"] {{
+    border-radius: 12px; overflow: hidden;
+    border: 1px solid {T['border']};
+  }}
+  div[data-testid="stDataFrame"] thead tr th {{
+    background-color: {T['card']} !important;
+    color: {T['muted']} !important;
+    text-transform: uppercase; font-size: 11px !important;
+    letter-spacing: 0.05em; font-weight: 500 !important;
+    border-bottom: 1px solid {T['border']} !important;
+  }}
+
+  /* Onboarding card */
+  .m-onboard {{
+    background-color: {T['card']}; border: 1px solid {T['border']};
+    border-radius: 14px; padding: 32px 36px; margin: 16px 0 24px 0;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.06);
+  }}
+  .m-onboard h2 {{ font-size: 28px; margin: 0 0 12px 0; }}
+  .m-onboard p {{ font-size: 15px; color: {T['text']}; line-height: 1.65; margin: 8px 0; }}
+
+  /* Inputs */
+  [data-baseweb="input"] input, .stSelectbox > div > div {{
+    background-color: {T['card']} !important;
+    border-color: {T['border']} !important;
+  }}
 </style>
 """, unsafe_allow_html=True)
+
+
+# ── Theme-aware Python tokens (used in inline HTML strings below) ─────────────
+M_TEXT = T["text"]; M_MUTED = T["muted"]; M_CARD = T["card"]
+M_BORDER = T["border"]; M_TRACK = T["track"]; M_PAGE = T["page"]
+ALTAIR_GREEN = "#16A34A"; ALTAIR_RED = "#DC2626"
+ALTAIR_NEUTRAL = "#9CA3AF"; ALTAIR_AMBER = "#F59E0B"
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -113,18 +233,19 @@ def fmt(val, spec: str = ",.0f", fallback: str = "N/A") -> str:
 
 
 def score_color(v: float) -> str:
-    if v >= 70:   return "#00C853"
-    if v >= 50:   return "#FFB300"
-    if v >= 35:   return "#FF6D00"
-    return "#FF1744"
+    """Colour for a 0–100 score. Used for chart accents and sub-score bars."""
+    if v >= 70:   return "#16A34A"   # green
+    if v >= 50:   return "#F59E0B"   # amber
+    if v >= 35:   return "#EA580C"   # orange
+    return "#DC2626"                  # red
 
 
 def action_badge_html(action: str) -> str:
-    c = ACTION_COLORS.get(action, "#78909C")
+    bg, fg = ACTION_PILL.get(action, ACTION_PILL["ILLIQUID"])
     return (
-        f"<span class='badge' "
-        f"style='background:{c}22;color:{c};border:1px solid {c}'>"
-        f"{action}</span>"
+        f"<span class='m-pill' style='background:{bg};color:{fg}'>"
+        f"{action.replace('_', ' ').title() if action != 'INVEST' and action != 'AVOID' else action}"
+        f"</span>"
     )
 
 
@@ -132,44 +253,57 @@ def subscore_bar(label: str, weight: str, val: float) -> str:
     pct = min(max(val, 0), 100)
     c = score_color(pct)
     return f"""
-    <div class="subscore-row">
-      <div class="subscore-label">
-        <span style="color:#CCC">{label} <span style="color:#555">{weight}</span></span>
+    <div class="m-sub-row">
+      <div class="m-sub-label">
+        <span>{label}<span class="weight">{weight}</span></span>
         <b style="color:{c}">{val:.1f}</b>
       </div>
-      <div class="bar-track">
-        <div class="bar-fill" style="width:{pct}%;background:{c}"></div>
+      <div class="m-bar-track">
+        <div class="m-bar-fill" style="width:{pct}%;background:{c}"></div>
       </div>
     </div>"""
 
 
 def concentration_gauge(buy_pct: float, subtitle: str = "buy vs sell concentration") -> str:
     sell_pct = 100 - buy_pct
-    sell_c, buy_c = "#FF1744", "#00C853"
+    sell_c, buy_c, neutral = "#DC2626", "#16A34A", M_MUTED
     if buy_pct > 60:
-        label = "⮕ ACCUMULATION"
+        label = "Accumulation"
         label_c = buy_c
     elif buy_pct < 40:
-        label = "⬅ DISTRIBUTION"
+        label = "Distribution"
         label_c = sell_c
     else:
-        label = "↔ BALANCED"
-        label_c = "#78909C"
+        label = "Balanced"
+        label_c = neutral
     return f"""
-    <div style="margin:10px 0">
-      <div style="display:flex;justify-content:space-between;font-size:0.82rem;margin-bottom:5px">
-        <b style="color:{sell_c}">▼ SELL {sell_pct:.0f}%</b>
-        <span style="color:#555;font-size:0.75rem">{subtitle}</span>
-        <b style="color:{buy_c}">BUY {buy_pct:.0f}% ▲</b>
+    <div style="margin:14px 0 4px 0">
+      <div style="display:flex;justify-content:space-between;align-items:baseline;font-size:12px;margin-bottom:6px">
+        <span style="color:{sell_c};font-weight:600">Sell {sell_pct:.0f}%</span>
+        <span style="color:{M_MUTED};font-size:11px;text-transform:uppercase;letter-spacing:0.08em">{subtitle}</span>
+        <span style="color:{buy_c};font-weight:600">Buy {buy_pct:.0f}%</span>
       </div>
-      <div class="conc-wrap">
-        <div class="conc-sell" style="width:{sell_pct}%"></div>
-        <div class="conc-buy"  style="width:{buy_pct}%"></div>
+      <div class="m-gauge-wrap">
+        <div class="m-gauge-sell" style="width:{sell_pct}%"></div>
+        <div class="m-gauge-buy"  style="width:{buy_pct}%"></div>
       </div>
-      <div style="text-align:center;font-size:0.75rem;color:{label_c};margin-top:4px">
+      <div style="text-align:center;font-size:12px;color:{label_c};margin-top:8px;font-weight:500">
         {label}
       </div>
     </div>"""
+
+
+def stat_card_html(label: str, value: str, sub: str = "", small: bool = False) -> str:
+    """Ramp-style stat: small uppercase eyebrow + huge tabular number + tiny sub."""
+    cls = "num small" if small else "num"
+    sub_html = f"<p class='sub'>{sub}</p>" if sub else ""
+    return (
+        f"<div class='m-stat'>"
+        f"<p class='label'>{label}</p>"
+        f"<p class='{cls}'>{value}</p>"
+        f"{sub_html}"
+        f"</div>"
+    )
 
 
 def predict_pattern(row: pd.Series, flow_df: pd.DataFrame):
@@ -252,6 +386,48 @@ with _auto_placeholder.container():
             st.warning(f"Auto-scoring skipped: {_e}")
 _auto_placeholder.empty()
 
+
+# ── Onboarding popup (first visit) ────────────────────────────────────────────
+if not st.session_state.onboarding_done:
+    st.markdown(
+        f"""
+        <div class="m-onboard">
+          <p class="m-eyebrow" style="color:{M_MUTED};font-size:11px;
+              text-transform:uppercase;letter-spacing:0.08em;margin-bottom:8px">
+            Welcome to Mantra
+          </p>
+          <h2>Here's what you're looking at.</h2>
+          <p>
+            Mantra processes every listed stock on the IDX each night and ranks
+            them by order flow conviction. Start with <b>INVEST</b> and
+            <b>WATCH_EXEC</b>. INVEST means the accumulation signal is confirmed
+            and price is beginning to move on volume. WATCH_EXEC means the
+            signal is clearly present but price hasn't moved yet. That's the
+            setup.
+          </p>
+          <p>
+            Check the Broker Anomaly score on anything that looks interesting.
+            A score above 70 alongside an INVEST label means two independent
+            statistical methods are confirming the same thing. That's the
+            highest-conviction output the system generates.
+          </p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+    _ob_a, _ob_b, _ = st.columns([1, 1, 4])
+    with _ob_a:
+        if st.button("Open the screener", type="secondary", use_container_width=True):
+            st.session_state.onboarding_done = True
+            st.rerun()
+    with _ob_b:
+        st.link_button(
+            "Read the methodology",
+            url="/White_Paper",
+            use_container_width=True,
+        )
+    st.stop()
+
 # ── Stale-data banner ─────────────────────────────────────────────────────────
 # IDX trades Mon-Fri; on a normal weekday after market close the DB should
 # contain T or T-1. Anything older means the daily refresh job didn't run
@@ -270,9 +446,13 @@ if _latest_db_date:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## MyMantra")
-    st.caption("An experimental broker-flow screener for the Indonesian stock market.")
-    st.divider()
+    st.markdown(
+        f"<div style='font-size:22px;font-weight:700;letter-spacing:-0.02em;"
+        f"margin:4px 0 2px 0;color:{M_TEXT}'>Mantra</div>"
+        f"<div style='color:{M_MUTED};font-size:12px;margin-bottom:18px;line-height:1.5'>"
+        f"Broker-flow screener for the Indonesian stock market.</div>",
+        unsafe_allow_html=True,
+    )
 
     available_dates = cached_available_dates(CONFIG_PATH)
     if not available_dates:
@@ -293,11 +473,12 @@ with st.sidebar:
         _picked = min(_date_objs, key=lambda d: abs(d - _picked))
         st.caption(f"No data for selected date — showing closest: {_picked}")
     selected_date = str(_picked)
-    st.divider()
 
-    min_invest = st.slider("Min Investment Score", 0, 100, 0)
+    st.markdown("<div style='height:18px'></div>", unsafe_allow_html=True)
+
+    min_invest = st.slider("Min investment score", 0, 100, 0)
     min_adv_b = st.slider(
-        "Min Avg Daily Value (IDR billion)",
+        "Min avg daily value (IDR billion)",
         min_value=0.0,
         max_value=50.0,
         value=0.0,
@@ -306,6 +487,15 @@ with st.sidebar:
     )
     only_breakout = st.checkbox("Breakout signals only", value=False)
     selected_actions = ["INVEST", "WATCH_EXEC", "WATCH", "OBSERVE", "AVOID"]
+
+    st.markdown("<div style='height:24px'></div>", unsafe_allow_html=True)
+
+    # Dark mode toggle (drives the CSS injection at the top of this script).
+    st.toggle(":material/dark_mode: Dark mode", key="dark_mode")
+
+    if st.button(":material/help: How this works", use_container_width=True):
+        st.session_state.onboarding_done = False
+        st.rerun()
 
 
 # ── Load & filter data ────────────────────────────────────────────────────────
@@ -329,15 +519,23 @@ filtered = df[mask].copy().reset_index(drop=True)
 
 
 # ── Header row ────────────────────────────────────────────────────────────────
-st.markdown(f"## MyMantra &nbsp; `{selected_date}` &nbsp; <span style='color:#555;font-size:1rem'>{len(df)} tickers scored</span>", unsafe_allow_html=True)
-
-st.divider()
+st.markdown(
+    f"<p class='m-eyebrow' style='color:{M_MUTED};font-size:11px;text-transform:uppercase;"
+    f"letter-spacing:0.08em;margin:4px 0 6px 0'>IDX Screener · {selected_date}</p>"
+    f"<h1 style='font-size:44px;margin:0 0 4px 0;font-weight:700;letter-spacing:-0.03em'>Mantra</h1>"
+    f"<p style='color:{M_MUTED};font-size:15px;margin:0 0 28px 0'>"
+    f"{len(df):,} tickers scored · {len(filtered):,} match the current filters</p>",
+    unsafe_allow_html=True,
+)
 
 
 # ── Rankings table ────────────────────────────────────────────────────────────
 st.markdown(
-    f"### Rankings &nbsp; "
-    f"<span style='color:#555;font-size:1rem'>Top 100 by broker signal strength · scored with real broker flow data</span>",
+    f"<p class='m-eyebrow' style='color:{M_MUTED};font-size:11px;text-transform:uppercase;"
+    f"letter-spacing:0.08em;margin:0 0 4px 0'>Rankings</p>"
+    f"<h3 style='font-size:22px;margin:0 0 4px 0'>Top 100 by broker signal strength</h3>"
+    f"<p style='color:{M_MUTED};font-size:13px;margin:0 0 16px 0'>"
+    f"Validated with real broker flow data and Isolation Forest anomaly detection.</p>",
     unsafe_allow_html=True,
 )
 
@@ -375,10 +573,11 @@ def _color_score_bg(v) -> str:
         pct = float(v)
     except (TypeError, ValueError):
         return ""
-    if pct >= 70:   return "background-color: #00C85330; color: #00C853"
-    if pct >= 55:   return "background-color: #FFB30030; color: #FFB300"
-    if pct >= 40:   return "background-color: #FF6D0030; color: #FF6D00"
-    return "background-color: #FF174430; color: #FF1744"
+    # Ramp-style: 10% opacity background, dark accessible text colour.
+    if pct >= 70:   return "background-color: #D1FAE5; color: #065F46; font-weight:500"
+    if pct >= 55:   return "background-color: #FEF9C3; color: #854D0E; font-weight:500"
+    if pct >= 40:   return "background-color: #FFEDD5; color: #9A3412; font-weight:500"
+    return "background-color: #FEE2E2; color: #991B1B; font-weight:500"
 
 
 score_subset = [c for c in ["investment_score", "broker_flow_real_score", "broker_flow_score"] if c in rank_df.columns]
@@ -416,9 +615,8 @@ flow_df = cached_ticker_flow(selected_ticker, CONFIG_PATH, days=30)
 from src.config import Config as _Cfg
 _cfg_weights = _Cfg.load(CONFIG_PATH).weights
 
-# Ticker header card
+# Ticker header card — Ramp-style: big ticker, action pill, side stats
 action_val   = str(row.get("action", "—"))
-action_color = ACTION_COLORS.get(action_val, "#78909C")
 inv_score    = safe_float(row.get("investment_score", 0))
 breakout     = bool(row.get("breakout_signal", False))
 company      = str(row.get("company_name", selected_ticker))
@@ -428,32 +626,46 @@ if company == selected_ticker:
 close_disp   = fmt(row.get("close"), ",.0f")
 avg_idr      = safe_float(row.get("avg_daily_value_idr", 0))
 avg_idr_disp = f"{avg_idr/1e9:.1f}B" if avg_idr else "N/A"
+inv_color    = score_color(inv_score)
+breakout_lbl = "Confirmed" if breakout else "Pending"
+breakout_clr = "#16A34A" if breakout else M_MUTED
 
 st.markdown(
     f"""
-    <div class="ticker-header" style="border-left:4px solid {action_color}">
-      <div style="display:flex;align-items:center;gap:20px;flex-wrap:wrap">
-        <div>
-          <div style="font-size:1.9rem;font-weight:800;line-height:1.1">{selected_ticker}</div>
-          <div style="color:#666;font-size:0.82rem">{company}</div>
+    <div class="m-card" style="padding:28px 32px">
+      <div style="display:flex;align-items:flex-start;gap:24px;flex-wrap:wrap">
+        <div style="flex:1 1 240px">
+          <p class="m-eyebrow" style="color:{M_MUTED};font-size:11px;text-transform:uppercase;
+              letter-spacing:0.08em;margin:0 0 4px 0">Ticker</p>
+          <div style="font-size:48px;font-weight:700;line-height:1;letter-spacing:-0.03em;
+              color:{M_TEXT}">{selected_ticker}</div>
+          <div style="color:{M_MUTED};font-size:13px;margin-top:6px">{company}</div>
+          <div style="margin-top:14px">{action_badge_html(action_val)}</div>
         </div>
-        {action_badge_html(action_val)}
-        <div style="margin-left:auto;display:flex;gap:28px;text-align:center">
+        <div style="display:flex;gap:36px;flex-wrap:wrap">
           <div>
-            <div style="font-size:1.5rem;font-weight:700;color:{score_color(inv_score)}">{inv_score:.1f}</div>
-            <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">INVEST</div>
+            <p class="m-eyebrow" style="color:{M_MUTED};font-size:11px;text-transform:uppercase;
+                letter-spacing:0.08em;margin:0 0 4px 0">Investment score</p>
+            <div style="font-size:32px;font-weight:700;color:{inv_color};line-height:1;
+                font-variant-numeric:tabular-nums">{inv_score:.1f}</div>
           </div>
           <div>
-            <div style="font-size:1.5rem;font-weight:700;color:{'#00C853' if breakout else '#555'}">{'🚀' if breakout else '—'}</div>
-            <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">BREAKOUT</div>
+            <p class="m-eyebrow" style="color:{M_MUTED};font-size:11px;text-transform:uppercase;
+                letter-spacing:0.08em;margin:0 0 4px 0">Breakout</p>
+            <div style="font-size:18px;font-weight:600;color:{breakout_clr};line-height:1.6">
+              {breakout_lbl}</div>
           </div>
           <div>
-            <div style="font-size:1.1rem;font-weight:600">{close_disp}</div>
-            <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">CLOSE IDR</div>
+            <p class="m-eyebrow" style="color:{M_MUTED};font-size:11px;text-transform:uppercase;
+                letter-spacing:0.08em;margin:0 0 4px 0">Close (IDR)</p>
+            <div style="font-size:18px;font-weight:600;color:{M_TEXT};line-height:1.6;
+                font-variant-numeric:tabular-nums">{close_disp}</div>
           </div>
           <div>
-            <div style="font-size:1.1rem;font-weight:600">{avg_idr_disp}</div>
-            <div style="color:#555;font-size:0.7rem;letter-spacing:.5px">AVG/DAY IDR</div>
+            <p class="m-eyebrow" style="color:{M_MUTED};font-size:11px;text-transform:uppercase;
+                letter-spacing:0.08em;margin:0 0 4px 0">Avg daily value</p>
+            <div style="font-size:18px;font-weight:600;color:{M_TEXT};line-height:1.6;
+                font-variant-numeric:tabular-nums">{avg_idr_disp}</div>
           </div>
         </div>
       </div>
@@ -541,12 +753,12 @@ with tab_scores:
 
             for label, value, desc in signal_rows:
                 st.markdown(
-                    f"<div style='padding:8px 0;border-bottom:1px solid #2D3140'>"
-                    f"  <div style='display:flex;justify-content:space-between;align-items:baseline;font-size:0.85rem'>"
-                    f"    <span style='color:#CCC'>{label}</span>"
-                    f"    <b style='margin-left:12px;white-space:nowrap'>{value}</b>"
+                    f"<div style='padding:12px 0;border-bottom:1px solid {M_BORDER}'>"
+                    f"  <div style='display:flex;justify-content:space-between;align-items:baseline;font-size:14px'>"
+                    f"    <span style='color:{M_TEXT}'>{label}</span>"
+                    f"    <b style='margin-left:12px;white-space:nowrap;font-variant-numeric:tabular-nums'>{value}</b>"
                     f"  </div>"
-                    f"  <div style='color:#555;font-size:0.75rem;margin-top:2px'>{desc}</div>"
+                    f"  <div style='color:{M_MUTED};font-size:12px;margin-top:4px;line-height:1.5'>{desc}</div>"
                     f"</div>",
                     unsafe_allow_html=True,
                 )
@@ -649,7 +861,12 @@ with tab_broker:
         st.divider()
 
         # ── Net accumulation chart — sorted by net volume ─────────────────────
-        st.markdown("#### Net Volume by Broker  <span style='color:#555;font-size:0.8rem'>(green = net buyer, red = net seller)</span>", unsafe_allow_html=True)
+        st.markdown(
+            f"<h4 style='font-size:18px;margin:24px 0 8px 0'>Net volume by broker</h4>"
+            f"<p style='color:{M_MUTED};font-size:13px;margin:0 0 12px 0'>"
+            f"Green = net buyer · Red = net seller</p>",
+            unsafe_allow_html=True,
+        )
 
         chart_df = bdf.nlargest(20, "buy_volume")[["code", "net_vol_m"]].copy()
         chart_df = chart_df.sort_values("net_vol_m", ascending=True)
@@ -662,8 +879,8 @@ with tab_broker:
                 x=alt.X("net_vol_m:Q", title="Net Volume (M lots)"),
                 color=alt.condition(
                     alt.datum["net_vol_m"] > 0,
-                    alt.value("#00C853"),
-                    alt.value("#FF1744"),
+                    alt.value(ALTAIR_GREEN),
+                    alt.value(ALTAIR_RED),
                 ),
                 tooltip=[
                     alt.Tooltip("code:N", title="Broker"),
@@ -677,9 +894,9 @@ with tab_broker:
 
         # ── Top Net Buyers / Top Net Sellers ──────────────────────────────────
         def _net_color(v: float) -> str:
-            if v > 0: return "color: #00C853; font-weight:bold"
-            if v < 0: return "color: #FF1744; font-weight:bold"
-            return "color: #555"
+            if v > 0: return "color: #16A34A; font-weight:600"
+            if v < 0: return "color: #DC2626; font-weight:600"
+            return f"color: {M_MUTED}"
 
         # Sort by actual buy/sell volume — not net — so the tables answer
         # "who bought the most?" and "who sold the most?" clearly
@@ -698,7 +915,11 @@ with tab_broker:
         tbl_fmt = {"Buy (M lots)": "{:.2f}", "Sell (M lots)": "{:.2f}", "Net (M lots)": "{:+.2f}"}
 
         with col_buy:
-            st.markdown("#### 🟢 Top Buyers  <span style='color:#555;font-size:0.8rem'>by buy volume</span>", unsafe_allow_html=True)
+            st.markdown(
+                f"<h4 style='font-size:16px;margin:8px 0 4px 0;color:#16A34A'>Top buyers</h4>"
+                f"<p style='color:{M_MUTED};font-size:12px;margin:0 0 8px 0'>by buy volume</p>",
+                unsafe_allow_html=True,
+            )
             top_buyers.columns = ["Code", "Broker", "Buy (M lots)", "Sell (M lots)", "Net (M lots)"]
             st.dataframe(
                 top_buyers.style
@@ -708,7 +929,11 @@ with tab_broker:
             )
 
         with col_sell:
-            st.markdown("#### 🔴 Top Sellers  <span style='color:#555;font-size:0.8rem'>by sell volume</span>", unsafe_allow_html=True)
+            st.markdown(
+                f"<h4 style='font-size:16px;margin:8px 0 4px 0;color:#DC2626'>Top sellers</h4>"
+                f"<p style='color:{M_MUTED};font-size:12px;margin:0 0 8px 0'>by sell volume</p>",
+                unsafe_allow_html=True,
+            )
             top_sellers.columns = ["Code", "Broker", "Buy (M lots)", "Sell (M lots)", "Net (M lots)"]
             st.dataframe(
                 top_sellers.style
@@ -854,8 +1079,8 @@ with tab_broker:
                     def _if_color(v) -> str:
                         try:
                             score = float(v)
-                            if score >= 70: return "background-color:#FF174430;color:#FF1744;font-weight:bold"
-                            if score >= 50: return "background-color:#FF6D0030;color:#FF6D00"
+                            if score >= 70: return "background-color:#FEE2E2;color:#991B1B;font-weight:600"
+                            if score >= 50: return "background-color:#FFEDD5;color:#9A3412;font-weight:500"
                         except (TypeError, ValueError):
                             pass
                         return ""
@@ -886,9 +1111,9 @@ with tab_broker:
                     _chart_df["name"] = _chart_df["code"].map(broker_names).fillna(_chart_df["code"])
                     _chart_df["label"] = _chart_df["code"] + " — " + _chart_df["name"].str.slice(0, 20)
                     _chart_df["color"] = _chart_df.apply(
-                        lambda r: "#FF1744" if r["direction"] == "selling"
-                        else "#00C853" if r["direction"] == "buying"
-                        else "#78909C",
+                        lambda r: ALTAIR_RED if r["direction"] == "selling"
+                        else ALTAIR_GREEN if r["direction"] == "buying"
+                        else ALTAIR_NEUTRAL,
                         axis=1,
                     )
                     _chart_df = _chart_df.sort_values("anomaly_score", ascending=True)
@@ -908,10 +1133,10 @@ with tab_broker:
                                 scale=None,
                                 legend=alt.Legend(
                                     title="Direction",
-                                    values=["#00C853", "#FF1744", "#78909C"],
+                                    values=[ALTAIR_GREEN, ALTAIR_RED, ALTAIR_NEUTRAL],
                                     labelExpr=(
-                                        "datum.value === '#00C853' ? 'Buying' : "
-                                        "datum.value === '#FF1744' ? 'Selling' : 'Neutral'"
+                                        f"datum.value === '{ALTAIR_GREEN}' ? 'Buying' : "
+                                        f"datum.value === '{ALTAIR_RED}' ? 'Selling' : 'Neutral'"
                                     ),
                                 ),
                             ),
@@ -935,7 +1160,7 @@ with tab_broker:
                                 "label:N",
                                 scale=alt.Scale(
                                     domain=["Moderate", "Strong"],
-                                    range=["#FF6D00", "#FF1744"],
+                                    range=["#EA580C", ALTAIR_RED],
                                 ),
                             ),
                         )
@@ -954,7 +1179,7 @@ with tab_price:
 
         close_line = (
             alt.Chart(price_df)
-            .mark_line(color="#DFFE23", strokeWidth=2)
+            .mark_line(color=ALTAIR_GREEN, strokeWidth=2)
             .encode(
                 x=alt.X("Date:T", title=None),
                 y=alt.Y("close:Q", title="Close (IDR)", scale=alt.Scale(zero=False)),
@@ -965,7 +1190,7 @@ with tab_price:
 
         vol_bar = (
             alt.Chart(price_df)
-            .mark_bar(color="#70858F", opacity=0.7)
+            .mark_bar(color=ALTAIR_NEUTRAL, opacity=0.6)
             .encode(
                 x=alt.X("Date:T", title=None),
                 y=alt.Y("volume:Q", title="Volume"),
@@ -1036,7 +1261,7 @@ with tab_history:
                     "Metric:N",
                     scale=alt.Scale(
                         domain=["Investment", "BF Real"],
-                        range=["#DFFE23", "#70858F"],
+                        range=[ALTAIR_GREEN, ALTAIR_AMBER],
                     ),
                 ),
                 tooltip=["date:T", "Metric:N", alt.Tooltip("Score:Q", format=".1f")],
