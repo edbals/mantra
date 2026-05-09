@@ -213,10 +213,12 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
             <button className={`chip ${breakout?"active":""}`} onClick={()=>setBreakout(!breakout)}>
               <IconBolt w={11}/> Breakout only
             </button>
-            <span className="range-chip">
+            <span className="range-chip" style={{ marginLeft:"auto" }}>
               Min ADV
-              <input type="range" min="0" max="100" step="1" value={minAdvB} onChange={e=>setMinAdvB(+e.target.value)}/>
-              <span className="mono" style={{ width:36, textAlign:"right" }}>{minAdvB}B</span>
+              <input type="range" min="0" max="100" step="1" value={minAdvB}
+                     onChange={e=>setMinAdvB(+e.target.value)}
+                     style={{ width:60 }}/>
+              <span className="mono" style={{ width:30, textAlign:"right" }}>{minAdvB}B</span>
             </span>
           </div>
         }
