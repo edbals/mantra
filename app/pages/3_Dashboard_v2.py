@@ -36,6 +36,29 @@ st.markdown(
       .block-container { padding: 0 !important; max-width: 100% !important; }
       footer { display: none; }
       [data-testid="stSidebarCollapsedControl"] { display: block; }
+      /* Date picker bar above the embedded app */
+      .date-bar {
+        background: #0b0b0a;
+        padding: 10px 20px;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        font-family: 'Geist', system-ui, sans-serif;
+      }
+      .date-bar-label {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: #797876;
+        font-weight: 500;
+      }
+      div[data-testid="stDateInput"] { width: 220px; }
+      div[data-testid="stDateInput"] input {
+        background: #1a1918 !important; color: #e8e6e2 !important;
+        border: 1px solid rgba(255,255,255,0.06) !important;
+        font-family: 'Geist Mono', monospace !important;
+      }
     </style>
     """,
     unsafe_allow_html=True,
@@ -547,9 +570,40 @@ def _build_inlined_html_uncached(requested_date: str | None = None) -> str:
     return html
 
 
-_requested = ""
-try:
-    _requested = st.query_params.get("date") or ""
-except Exception:
-    pass
+# ─── Native Streamlit date picker — works around iframe sandbox restrictions ────
+_available = list_scored_dates()
+if _available:
+    from datetime import date as _date
+
+    _avail_dates = [_date.fromisoformat(d) for d in _available]
+    _max_d, _min_d = max(_avail_dates), min(_avail_dates)
+
+    _q = ""
+    try:
+        _q = st.query_params.get("date") or ""
+    except Exception:
+        pass
+    _initial = _date.fromisoformat(_q) if _q in _available else _max_d
+
+    _col_label, _col_picker, _col_spacer = st.columns([1, 3, 12])
+    with _col_label:
+        st.markdown("<div style='padding-top:18px;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#797876;font-weight:500'>Scoring date</div>", unsafe_allow_html=True)
+    with _col_picker:
+        _picked = st.date_input(
+            "Scoring date",
+            value=_initial,
+            min_value=_min_d,
+            max_value=_max_d,
+            label_visibility="collapsed",
+            format="YYYY-MM-DD",
+        )
+    _picked_str = _picked.isoformat()
+    if _picked_str in _available and _picked_str != _q:
+        st.query_params["date"] = _picked_str
+        st.rerun()
+
+    _requested = _picked_str
+else:
+    _requested = ""
+
 components.html(build_inlined_html(_requested), height=1100, scrolling=True)

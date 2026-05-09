@@ -155,18 +155,9 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
           <div className="subtitle">Top scored by broker flow signal · scored {new Date().toDateString()}</div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <Calendar
-            value={window.SCORING_DATE || ""}
-            available={(window.AVAILABLE_DATES || []).filter(Boolean)}
-            onPick={(d)=>{
-              const target = "?date=" + encodeURIComponent(d);
-              // Try every escalation: window.top (whole tab), then parent
-              try { window.top.location.search = target; return; } catch(_){ }
-              try { window.parent.location.search = target; return; } catch(_){ }
-              // Last resort — open in new tab
-              try { window.open(target, "_top"); } catch(_){ }
-            }}
-          />
+          <span className="btn" style={{ cursor:"default" }}>
+            <IconCalendar w={13}/> {window.SCORING_DATE || "—"}
+          </span>
           <button className="btn-primary btn" onClick={()=>window.parent && window.parent.location.reload()}>
             <IconRefresh w={13}/> Refresh data
           </button>
