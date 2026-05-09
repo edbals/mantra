@@ -1,6 +1,17 @@
 // View components for IDX Screener prototype
 const { useState: useStateV } = React;
-const D = window.IDX_DATA;
+const D = window.IDX_DATA || {};
+// Guarantee every key exists so an unexpected null doesn't crash a render
+D.RANKINGS         = D.RANKINGS         || [];
+D.SUBSCORES        = D.SUBSCORES        || {};
+D.FLOW_SIGNALS     = D.FLOW_SIGNALS     || [];
+D.TOP_BUYERS       = D.TOP_BUYERS       || [];
+D.TOP_SELLERS      = D.TOP_SELLERS      || [];
+D.BROKER_NET       = D.BROKER_NET       || [];
+D.PRICE_SERIES     = D.PRICE_SERIES     || [];
+D.SCORE_HISTORY    = D.SCORE_HISTORY    || [];
+D.ANOMALIES        = D.ANOMALIES        || [];
+D.ISOLATION_FOREST = D.ISOLATION_FOREST || [];
 
 const KPI = ({ label, value, unit, color }) => (
   <div className="kpi">
