@@ -118,11 +118,19 @@ def build_rankings() -> list[dict]:
 
 def build_anomalies(baseline_days: int = 22) -> tuple[list[dict], list[dict]]:
     """
-    Compute z-score + Isolation Forest anomaly for each watchlist broker
-    across the most recent trading day vs a baseline window.
+    Real anomaly detection per watchlist broker, aggregated across all Stage 2
+    tickers. Combines:
+      - z-score on net volume (today vs baseline mean)
+      - Isolation Forest (sklearn) on (net_volume, buy_volume, sell_volume,
+        buy_ratio, net_ratio) — fitted on historical baseline only.
 
-    Returns (anomalies, isolation_forest) — two arrays in the prototype's shape.
+    Returns (anomalies, isolation_forest) — both arrays always populated when
+    we have enough data; anomalies is the subset that crosses thresholds.
     """
+    import sys
+    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+    from src.anomaly import score_brokers
+
     config_path = Path(__file__).parent.parent.parent / "config.json"
     if not config_path.exists():
         return [], []
@@ -139,9 +147,9 @@ def build_anomalies(baseline_days: int = 22) -> tuple[list[dict], list[dict]]:
     placeholders = ",".join("?" * len(watchlist))
     df = pd.read_sql_query(
         f"""
-        SELECT date, broker_code,
-               SUM(buy_volume) AS buy_vol,
-               SUM(sell_volume) AS sell_vol
+        SELECT date, broker_code AS code,
+               SUM(buy_volume)  AS buy_volume,
+               SUM(sell_volume) AS sell_volume
         FROM broker_transactions
         WHERE broker_code IN ({placeholders})
         GROUP BY date, broker_code
@@ -149,75 +157,72 @@ def build_anomalies(baseline_days: int = 22) -> tuple[list[dict], list[dict]]:
         """,
         con, params=watchlist,
     )
+    con.close()
 
-    # Try to load broker name lookup for richer labels
+    # Broker names from broker_master.csv
     try:
-        cfg_load = Path(__file__).parent.parent.parent / "broker_master.csv"
-        bm = pd.read_csv(cfg_load)
+        bm = pd.read_csv(Path(__file__).parent.parent.parent / "broker_master.csv")
         col = next((c for c in bm.columns if c.strip().lower() in ("kode perusahaan", "broker_code", "code", "kode")), None)
-        name_col = next((c for c in bm.columns if c.strip().lower() in ("nama perusahaan", "name", "broker_name")), None)
-        names = dict(zip(bm[col].astype(str).str.strip(), bm[name_col])) if col and name_col else {}
+        ncol = next((c for c in bm.columns if c.strip().lower() in ("nama perusahaan", "name", "broker_name")), None)
+        names = dict(zip(bm[col].astype(str).str.strip(), bm[ncol])) if col and ncol else {}
     except Exception:
         names = {}
-    con.close()
 
     if df.empty:
         return [], []
 
-    df["net"] = df["buy_vol"].fillna(0) - df["sell_vol"].fillna(0)
-    df["net_m"] = df["net"] / 1e6
+    df["net_volume"] = df["buy_volume"].fillna(0) - df["sell_volume"].fillna(0)
 
     dates = sorted(df["date"].unique())
     if len(dates) < 5:
         return [], []
     today = dates[-1]
-    baseline_dates = [d for d in dates[-baseline_days-1:-1]]   # excludes today
+    baseline_dates = dates[-baseline_days-1:-1]
 
+    hist_df   = df[df["date"].isin(baseline_dates)].copy()
+    signal_df = df[df["date"] == today].copy()
+    if signal_df.empty or hist_df.empty:
+        return [], []
+
+    # Real Isolation Forest scores (sklearn, per-broker)
+    if_scored = score_brokers(hist_df, signal_df, contamination=0.05)
+    if_score_map = dict(zip(if_scored["code"], if_scored["anomaly_score"])) if not if_scored.empty else {}
+
+    # Z-scores on net volume (M lots) for the ANOMALIES table
     anomalies = []
     if_entries = []
-
     for code in watchlist:
-        broker = df[df["broker_code"] == code].copy()
-        if broker.empty:
+        broker_hist = hist_df[hist_df["code"] == code]["net_volume"]
+        if len(broker_hist) < 5:
             continue
-        today_row = broker[broker["date"] == today]
-        signal = float(today_row["net_m"].sum()) if not today_row.empty else 0.0
+        today_net = float(signal_df[signal_df["code"] == code]["net_volume"].sum())
+        mu = float(broker_hist.mean())
+        sigma = float(broker_hist.std()) or 1.0
+        z = (today_net - mu) / sigma
 
-        hist = broker[broker["date"].isin(baseline_dates)]["net_m"]
-        if len(hist) < 5:
-            continue
-
-        mu = float(hist.mean())
-        sigma = float(hist.std()) if len(hist) > 1 else 1.0
-        if sigma == 0:
-            sigma = 1.0
-        z = (signal - mu) / sigma
-
-        # Quick IF score: scale |z| to 0–100
-        # |z| = 1.5 → ~50, |z| = 3 → ~80, capped at 100
-        if_score = float(min(100.0, max(0.0, abs(z) * 30 + 5)))
-
-        direction = "buy" if signal > 0 else "sell"
-        if abs(z) >= 1.5 or if_score >= 50:
-            anomalies.append({
-                "code": code,
-                "name": str(names.get(code, code)).title()[:40],
-                "signal":   round(signal, 2),
-                "baseline": round(mu, 2),
-                "z":        round(z, 1),
-                "ifScore":  round(if_score, 0),
-                "dir":      direction,
-            })
+        if_score = float(if_score_map.get(code, 0.0))
+        direction = "buy" if today_net > 0 else "sell"
+        name = str(names.get(code, code)).title()[:40]
 
         if_entries.append({
-            "code": code,
-            "name": str(names.get(code, code)).title()[:40],
+            "code":  code,
+            "name":  name,
             "score": int(round(if_score)),
             "dir":   direction,
         })
+        if abs(z) >= 1.0 or if_score >= 40:
+            anomalies.append({
+                "code":     code,
+                "name":     name,
+                "signal":   round(today_net / 1e6, 2),
+                "baseline": round(mu / 1e6, 2),
+                "z":        round(z, 1),
+                "ifScore":  int(round(if_score)),
+                "dir":      direction,
+            })
 
-    # Sort anomalies by absolute z descending; IF list ascending by score (chart sorts)
-    anomalies.sort(key=lambda r: abs(r["z"]), reverse=True)
+    anomalies.sort(key=lambda r: max(abs(r["z"]), r["ifScore"] / 30), reverse=True)
+    if_entries.sort(key=lambda r: r["score"])
     return anomalies, if_entries
 
 
@@ -329,8 +334,8 @@ def build_inlined_html() -> str:
         f"<script>"
         f"if (window.IDX_DATA) {{"
         f"  window.IDX_DATA.RANKINGS = {json.dumps(rankings)};"
-        f"  if ({json.dumps(bool(anomalies))}) window.IDX_DATA.ANOMALIES = {json.dumps(anomalies)};"
-        f"  if ({json.dumps(bool(if_entries))}) window.IDX_DATA.ISOLATION_FOREST = {json.dumps(if_entries)};"
+        f"  window.IDX_DATA.ANOMALIES = {json.dumps(anomalies)};"
+        f"  window.IDX_DATA.ISOLATION_FOREST = {json.dumps(if_entries)};"
         f"}}"
         f"</script>"
     )

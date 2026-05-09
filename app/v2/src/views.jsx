@@ -42,7 +42,25 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
           <div className="subtitle">Top scored by broker flow signal · scored {new Date().toDateString()}</div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <span className="btn" style={{ cursor:"default" }}><IconCalendar w={13}/> {window.SCORING_DATE || "—"}</span>
+          <label className="btn" style={{ cursor:"pointer", position:"relative" }}>
+            <IconCalendar w={13}/> {window.SCORING_DATE || "—"}
+            <input
+              type="date"
+              defaultValue={window.SCORING_DATE || ""}
+              max={(window.AVAILABLE_DATES && window.AVAILABLE_DATES[0]) || ""}
+              min={(window.AVAILABLE_DATES && window.AVAILABLE_DATES[window.AVAILABLE_DATES.length - 1]) || ""}
+              onChange={(e)=>{
+                if (!e.target.value) return;
+                const url = new URL(window.parent.location.href);
+                url.searchParams.set("date", e.target.value);
+                window.parent.location.href = url.toString();
+              }}
+              style={{
+                position:"absolute", inset:0, opacity:0, cursor:"pointer",
+                width:"100%", height:"100%", padding:0, border:0
+              }}
+            />
+          </label>
           <button className="btn-primary btn" onClick={()=>window.parent && window.parent.location.reload()}>
             <IconRefresh w={13}/> Refresh data
           </button>
