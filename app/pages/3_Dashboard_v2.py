@@ -57,11 +57,22 @@ def _anomaly_proxy(row) -> int:
       score_adj  ∈ ~[-15, 30]  →  scaled to ~[0, 90]
       accum_streak ∈ [0, 10]   →  +0–10 bonus when above 3
     """
-    adj = float(row.get("score_adj") or 0)
-    streak = float(row.get("accum_streak") or 0)
+    adj_raw = row.get("score_adj")
+    adj = 0.0 if pd.isna(adj_raw) else float(adj_raw or 0)
+    streak_raw = row.get("accum_streak")
+    streak = 0.0 if pd.isna(streak_raw) else float(streak_raw or 0)
     base = max(0.0, adj) * 3.0
     streak_bonus = max(0.0, min(10.0, streak - 3) * 2.0)
     return int(min(100, base + streak_bonus + abs(min(0.0, adj)) * 1.5))
+
+
+def _f(v, default=0.0) -> float:
+    """Float-or-default that handles NaN, None, and empty strings."""
+    try:
+        f = float(v)
+        return default if pd.isna(f) else f
+    except (TypeError, ValueError):
+        return default
 
 
 def build_rankings() -> list[dict]:
@@ -82,19 +93,22 @@ def build_rankings() -> list[dict]:
 
     rankings = []
     for i, row in df.iterrows():
+        name = row.get("company_name")
+        if pd.isna(name) or not name:
+            name = row["ticker"]
         rankings.append({
             "rank":          int(i + 1),
             "ticker":        str(row["ticker"]),
-            "name":          str(row.get("company_name") or row["ticker"])[:60],
+            "name":          str(name)[:60],
             "action":        str(row.get("action") or "OBSERVE"),
-            "score":         round(float(row.get("investment_score") or 0), 1),
-            "breakout":      bool(row.get("breakout_signal")),
-            "brokerFlow":    round(float(row.get("broker_flow_real_score") or 0), 1),
-            "floatPressure": round(float(row.get("float_pressure_score") or 0), 1),
+            "score":         round(_f(row.get("investment_score")), 1),
+            "breakout":      bool(row.get("breakout_signal")) and not pd.isna(row.get("breakout_signal")),
+            "brokerFlow":    round(_f(row.get("broker_flow_real_score")), 1),
+            "floatPressure": round(_f(row.get("float_pressure_score")), 1),
             "anomaly":       _anomaly_proxy(row),
             "xlxc":          _xlxc_state(row),
-            "close":         int(float(row.get("close") or 0)),
-            "advB":          round(float(row.get("avg_daily_value_idr") or 0) / 1e9, 1),
+            "close":         int(_f(row.get("close"))),
+            "advB":          round(_f(row.get("avg_daily_value_idr")) / 1e9, 1),
             "trend":         0,
         })
     return rankings
