@@ -258,24 +258,35 @@ def build_per_ticker_broker_data(scores: pd.DataFrame) -> tuple[dict, dict, dict
     return top_buyers, top_sellers, broker_net
 
 
-def build_per_ticker_price_series(scores: pd.DataFrame, idxdb: Path, days: int = 30) -> dict:
-    """Last `days` of (date, close, volume) for each Stage 2 ticker."""
+def build_per_ticker_price_series(
+    scores: pd.DataFrame, idxdb: Path, scoring_date: str, days: int = 30,
+) -> dict:
+    """
+    Last `days` of (date, close, volume) for each Stage 2 ticker, ending on
+    the scoring_date (so historical date views show the chart as it looked
+    AT that date, not as it looks today).
+    """
     if "broker_data_source" in scores.columns:
         scores = scores[scores["broker_data_source"] == "indexalpha"]
     scores = scores[scores["action"] != "ILLIQUID"]
     if scores.empty or not idxdb.exists(): return {}
     tickers = scores["ticker"].tolist()
 
+    sd = pd.Timestamp(scoring_date)
+    upper_ms = int((sd + pd.Timedelta(days=1)).timestamp() * 1000)        # exclusive
+    lower_ms = int((sd - pd.Timedelta(days=days * 2 + 10)).timestamp() * 1000)
+
     con = sqlite3.connect(str(idxdb), check_same_thread=False)
     placeholders = ",".join("?" * len(tickers))
-    cutoff_ms = int((pd.Timestamp.now() - pd.Timedelta(days=days * 2 + 10)).timestamp() * 1000)
     try:
         df = pd.read_sql_query(
             f"""SELECT code AS ticker, date AS date_ms, close, volume
                 FROM stock_summary
-                WHERE code IN ({placeholders}) AND date >= ? AND volume > 0
+                WHERE code IN ({placeholders})
+                  AND date >= ? AND date < ?
+                  AND volume > 0
                 ORDER BY code, date""",
-            con, params=(*tickers, cutoff_ms))
+            con, params=(*tickers, lower_ms, upper_ms))
     finally:
         con.close()
     if df.empty: return {}
@@ -447,7 +458,7 @@ def main():
     anomalies, ifs  = build_volume_anomalies(scores, Path(args.idxdb))
     broker_if       = build_per_ticker_broker_if(scores)
     top_buy, top_sell, broker_net = build_per_ticker_broker_data(scores)
-    price_series    = build_per_ticker_price_series(scores, Path(args.idxdb))
+    price_series    = build_per_ticker_price_series(scores, Path(args.idxdb), scoring_date)
     flow_signals    = build_per_ticker_flow_signals(scores)
     score_history   = build_per_ticker_score_history(scores)
 
