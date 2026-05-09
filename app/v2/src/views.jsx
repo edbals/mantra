@@ -76,10 +76,11 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
             className="btn"
             value={window.SCORING_DATE || ""}
             onChange={(e)=>{
-              if (!e.target.value) return;
-              const url = new URL(window.parent.location.href);
-              url.searchParams.set("date", e.target.value);
-              window.parent.location.href = url.toString();
+              const d = e.target.value;
+              if (!d) return;
+              // Cross-origin: can't READ parent.location, but can WRITE .search
+              try { window.parent.location.search = "?date=" + encodeURIComponent(d); }
+              catch(err) { console.error("date nav failed", err); }
             }}
             style={{ paddingLeft:30, backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%23b8b6b2' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='16' rx='2'/><path d='M16 3v4M8 3v4M3 11h18'/></svg>\")", backgroundRepeat:"no-repeat", backgroundPosition:"10px center", appearance:"none" }}>
             {(window.AVAILABLE_DATES || [window.SCORING_DATE]).filter(Boolean).map(d =>
