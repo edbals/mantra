@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MyMantra: Indonesian Equity Screener</title>
+    <title>Mantra: Indonesian Equity Screener</title>
 
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -68,7 +68,7 @@
 
     <aside class="w-full md:w-72 bg-white border-r border-slate-200 flex-shrink-0 sticky top-0 md:h-screen overflow-y-auto">
         <div class="p-6">
-            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">MyMantra</h1>
+            <h1 class="text-2xl font-bold text-slate-800 tracking-tight">Mantra</h1>
             <p class="text-xs font-medium text-slate-500 uppercase tracking-widest mt-1 mb-6">v2.2 · Indonesian Equities</p>
 
             <nav class="space-y-1" id="main-nav">
@@ -106,13 +106,13 @@
         <section id="summary" class="tab-content active">
             <header class="mb-10">
                 <h1 class="text-4xl text-slate-900 mb-4">Executive Summary</h1>
-                <p class="text-xl text-slate-600 font-light leading-relaxed">A guiding overview of the MyMantra system and how to utilize its outputs.</p>
+                <p class="text-xl text-slate-600 font-light leading-relaxed">A guiding overview of the Mantra system and how to utilize its outputs.</p>
             </header>
 
             <div class="bg-white p-8 rounded-xl shadow-sm border border-slate-200 mb-8">
-                <h3 class="text-xl font-bold text-slate-800 mb-4">What is MyMantra?</h3>
-                <p class="mb-4">MyMantra is a quantitative stock screener built <strong>exclusively for the Indonesian Stock Exchange (IDX)</strong>. It is designed to identify the probability of institutional accumulation by analyzing market microstructure data specific to Indonesia—namely, transparent broker transaction flow, free-float pressure, and liquidity.</p>
-                <p>Unlike standard technical screeners, MyMantra looks under the hood of price action. In Indonesia, every equity transaction is publicly attributed to a broker code. This unique market feature allows us to observe whether institutional entities are accumulating a stock, and critically, whether retail participants are exiting.</p>
+                <h3 class="text-xl font-bold text-slate-800 mb-4">What is Mantra?</h3>
+                <p class="mb-4">Mantra is a quantitative stock screener built <strong>exclusively for the Indonesian Stock Exchange (IDX)</strong>. It is designed to identify the probability of institutional accumulation by analyzing market microstructure data specific to Indonesia—namely, transparent broker transaction flow, free-float pressure, and liquidity.</p>
+                <p>Unlike standard technical screeners, Mantra looks under the hood of price action. In Indonesia, every equity transaction is publicly attributed to a broker code. This unique market feature allows us to observe whether institutional entities are accumulating a stock, and critically, whether retail participants are exiting.</p>
             </div>
 
             <h3 class="text-2xl font-bold text-slate-800 mb-6 mt-12">How to Use the Output</h3>
@@ -186,7 +186,7 @@
                     </ul>
                 </div>
 
-                <p>MyMantra systematically captures these relationships. It strictly avoids pseudoscientific trading concepts, focusing instead on empirical volume distribution, standard deviations of broker activity, and the quantitative mechanics of supply and demand within the isolated Indonesian ecosystem.</p>
+                <p>Mantra systematically captures these relationships. It strictly avoids pseudoscientific trading concepts, focusing instead on empirical volume distribution, standard deviations of broker activity, and the quantitative mechanics of supply and demand within the isolated Indonesian ecosystem.</p>
             </div>
         </section>
 
@@ -197,7 +197,7 @@
             </header>
 
             <div class="prose max-w-none text-slate-700 space-y-6">
-                <p>Evaluating ~870 listed entities using granular, per-broker historical data is computationally expensive and subject to API rate limits. Therefore, MyMantra employs a funnel-based, two-stage scoring architecture.</p>
+                <p>Evaluating ~870 listed entities using granular, per-broker historical data is computationally expensive and subject to API rate limits. Therefore, Mantra employs a funnel-based, two-stage scoring architecture.</p>
 
                 <div class="my-10 p-6 bg-slate-50 rounded-xl border border-slate-200">
                     <div class="flex flex-col md:flex-row items-center justify-between space-y-6 md:space-y-0 md:space-x-4 text-center">
@@ -273,7 +273,7 @@
             </header>
 
             <div class="prose max-w-none text-slate-700 space-y-6">
-                <p>For the top 100 tickers selected from Stage 1, MyMantra fetches per-broker transaction volumes going back 60 trading days via the Index Alpha API.</p>
+                <p>For the top 100 tickers selected from Stage 1, Mantra fetches per-broker transaction volumes going back 60 trading days via the Index Alpha API.</p>
 
                 <h3 class="text-2xl font-bold text-slate-800 mt-8">Z-Score Sustained Buyers</h3>
                 <p>For every active non-retail broker, the system computes a Z-score against that broker's own historical baseline over the last 20+ days:</p>
@@ -285,7 +285,7 @@
                 <p>A broker is flagged as "buying significantly above average" when <strong>z &ge; 1.5</strong>. Brokers crossing this threshold add a "Presence Boost" to the ticker's score (Market Makers +12, Emitent +10, Institutions +8, Crossing +6; capped at +30 total).</p>
 
                 <h3 class="text-2xl font-bold text-slate-800 mt-10">The Float Amplifier (Interaction Term)</h3>
-                <p>Inspired by the academic framework of Wurgler &amp; Zhuravskaya (2002), which demonstrates that stocks with fewer arbitrage substitutes (tight free floats) experience larger price reactions to demand shocks, MyMantra applies a non-linear <strong>Float Amplifier</strong>.</p>
+                <p>Inspired by the academic framework of Wurgler &amp; Zhuravskaya (2002), which demonstrates that stocks with fewer arbitrage substitutes (tight free floats) experience larger price reactions to demand shocks, Mantra applies a non-linear <strong>Float Amplifier</strong>.</p>
                 <p>The intuition: An institution buying 10,000 lots of a low-float stock moves the price significantly more than buying 10,000 lots of a highly liquid, large-cap stock.</p>
 
                 <div class="chart-container mt-8">
@@ -310,7 +310,7 @@
             </header>
 
             <div class="prose max-w-none text-slate-700 space-y-6">
-                <p>While the Z-score is fast and interpretable, it assumes broker net volume is approximately normally distributed. To complement this, MyMantra implements an <strong>Isolation Forest</strong> (Liu, Ting, &amp; Zhou, 2008) machine learning model trained per-broker.</p>
+                <p>While the Z-score is fast and interpretable, it assumes broker net volume is approximately normally distributed. To complement this, Mantra implements an <strong>Isolation Forest</strong> (Liu, Ting, &amp; Zhou, 2008) machine learning model trained per-broker.</p>
 
                 <p>The Isolation Forest makes no distributional assumptions. It identifies observations that are "easy to isolate" from the rest of the historical data—meaning they sit in sparse regions of the multidimensional feature space.</p>
 
@@ -351,7 +351,7 @@
             </header>
 
             <div class="prose max-w-none text-slate-700 space-y-6">
-                <p>While tracking institutional flow on the IDX provides a significant informational advantage, the MyMantra system has distinct quantitative and structural limitations that must be acknowledged by researchers and operators.</p>
+                <p>While tracking institutional flow on the IDX provides a significant informational advantage, the Mantra system has distinct quantitative and structural limitations that must be acknowledged by researchers and operators.</p>
 
                 <div class="overflow-x-auto mt-8">
                     <table class="min-w-full divide-y divide-slate-200 text-sm border border-slate-200 rounded-lg overflow-hidden shadow-sm">

@@ -1,5 +1,5 @@
 """
-MyMantra — Strategy White Paper
+Mantra — Strategy White Paper
 Renders the rich HTML whitepaper inside Streamlit via components.html().
 """
 from __future__ import annotations
@@ -10,7 +10,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="White Paper — MyMantra",
+    page_title="White Paper — Mantra",
     page_icon="📄",
     layout="wide",
     initial_sidebar_state="collapsed",

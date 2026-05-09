@@ -1,5 +1,5 @@
 """
-Mantra Dashboard — MyMantra
+Mantra Dashboard — Mantra
 Run: streamlit run app/dashboard.py
 """
 from __future__ import annotations
@@ -40,7 +40,7 @@ ACTION_COLORS = {
 
 # ── Page setup ────────────────────────────────────────────────────────────────
 st.set_page_config(
-    page_title="MyMantra | IDX Screener",
+    page_title="Mantra | IDX Screener",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -270,7 +270,7 @@ if _latest_db_date:
 
 # ── Sidebar ───────────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.markdown("## MyMantra")
+    st.markdown("## Mantra")
     st.caption("An experimental broker-flow screener for the Indonesian stock market.")
     st.divider()
 
@@ -329,7 +329,7 @@ filtered = df[mask].copy().reset_index(drop=True)
 
 
 # ── Header row ────────────────────────────────────────────────────────────────
-st.markdown(f"## MyMantra &nbsp; `{selected_date}` &nbsp; <span style='color:#555;font-size:1rem'>{len(df)} tickers scored</span>", unsafe_allow_html=True)
+st.markdown(f"## Mantra &nbsp; `{selected_date}` &nbsp; <span style='color:#555;font-size:1rem'>{len(df)} tickers scored</span>", unsafe_allow_html=True)
 
 st.divider()
 

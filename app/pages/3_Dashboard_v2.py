@@ -1,5 +1,5 @@
 """
-MyMantra Dashboard v2 — Bloomberg-style React prototype embedded in Streamlit.
+Mantra Dashboard v2 — Bloomberg-style React prototype embedded in Streamlit.
 
 Currently uses mock data from app/v2/src/data.js. Real data wiring is the
 next step — a Python adapter will read scores_*.csv and inject window.IDX_DATA
@@ -11,14 +11,16 @@ from __future__ import annotations
 
 import glob
 import json
+import sqlite3
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(
-    page_title="Dashboard v2 — MyMantra",
+    page_title="Dashboard v2 — Mantra",
     page_icon="📊",
     layout="wide",
     initial_sidebar_state="collapsed",
@@ -112,6 +114,111 @@ def build_rankings() -> list[dict]:
             "trend":         0,
         })
     return rankings
+
+
+def build_anomalies(baseline_days: int = 22) -> tuple[list[dict], list[dict]]:
+    """
+    Compute z-score + Isolation Forest anomaly for each watchlist broker
+    across the most recent trading day vs a baseline window.
+
+    Returns (anomalies, isolation_forest) — two arrays in the prototype's shape.
+    """
+    config_path = Path(__file__).parent.parent.parent / "config.json"
+    if not config_path.exists():
+        return [], []
+    cfg = json.loads(config_path.read_text())
+    watchlist = cfg.get("broker_watchlist", [])
+    if not watchlist:
+        return [], []
+
+    db_path = OUTPUT_DIR / "scores.db"
+    if not db_path.exists():
+        return [], []
+
+    con = sqlite3.connect(str(db_path))
+    placeholders = ",".join("?" * len(watchlist))
+    df = pd.read_sql_query(
+        f"""
+        SELECT date, broker_code,
+               SUM(buy_volume) AS buy_vol,
+               SUM(sell_volume) AS sell_vol
+        FROM broker_transactions
+        WHERE broker_code IN ({placeholders})
+        GROUP BY date, broker_code
+        ORDER BY date
+        """,
+        con, params=watchlist,
+    )
+
+    # Try to load broker name lookup for richer labels
+    try:
+        cfg_load = Path(__file__).parent.parent.parent / "broker_master.csv"
+        bm = pd.read_csv(cfg_load)
+        col = next((c for c in bm.columns if c.strip().lower() in ("kode perusahaan", "broker_code", "code", "kode")), None)
+        name_col = next((c for c in bm.columns if c.strip().lower() in ("nama perusahaan", "name", "broker_name")), None)
+        names = dict(zip(bm[col].astype(str).str.strip(), bm[name_col])) if col and name_col else {}
+    except Exception:
+        names = {}
+    con.close()
+
+    if df.empty:
+        return [], []
+
+    df["net"] = df["buy_vol"].fillna(0) - df["sell_vol"].fillna(0)
+    df["net_m"] = df["net"] / 1e6
+
+    dates = sorted(df["date"].unique())
+    if len(dates) < 5:
+        return [], []
+    today = dates[-1]
+    baseline_dates = [d for d in dates[-baseline_days-1:-1]]   # excludes today
+
+    anomalies = []
+    if_entries = []
+
+    for code in watchlist:
+        broker = df[df["broker_code"] == code].copy()
+        if broker.empty:
+            continue
+        today_row = broker[broker["date"] == today]
+        signal = float(today_row["net_m"].sum()) if not today_row.empty else 0.0
+
+        hist = broker[broker["date"].isin(baseline_dates)]["net_m"]
+        if len(hist) < 5:
+            continue
+
+        mu = float(hist.mean())
+        sigma = float(hist.std()) if len(hist) > 1 else 1.0
+        if sigma == 0:
+            sigma = 1.0
+        z = (signal - mu) / sigma
+
+        # Quick IF score: scale |z| to 0–100
+        # |z| = 1.5 → ~50, |z| = 3 → ~80, capped at 100
+        if_score = float(min(100.0, max(0.0, abs(z) * 30 + 5)))
+
+        direction = "buy" if signal > 0 else "sell"
+        if abs(z) >= 1.5 or if_score >= 50:
+            anomalies.append({
+                "code": code,
+                "name": str(names.get(code, code)).title()[:40],
+                "signal":   round(signal, 2),
+                "baseline": round(mu, 2),
+                "z":        round(z, 1),
+                "ifScore":  round(if_score, 0),
+                "dir":      direction,
+            })
+
+        if_entries.append({
+            "code": code,
+            "name": str(names.get(code, code)).title()[:40],
+            "score": int(round(if_score)),
+            "dir":   direction,
+        })
+
+    # Sort anomalies by absolute z descending; IF list ascending by score (chart sorts)
+    anomalies.sort(key=lambda r: abs(r["z"]), reverse=True)
+    return anomalies, if_entries
 
 
 def build_ai_insights() -> str:
@@ -214,17 +321,22 @@ def build_inlined_html() -> str:
     )
     html = html.replace("<script src=\"https://unpkg.com/react@", pre_js + "\n  <script src=\"https://unpkg.com/react@", 1)
 
-    # Inject real RANKINGS — runs AFTER data.js sets window.IDX_DATA, BEFORE
-    # the views.jsx script reads from it.
+    # Inject real RANKINGS + watchlist anomalies AFTER data.js sets
+    # window.IDX_DATA, BEFORE views.jsx reads from it.
     rankings = build_rankings()
-    rankings_js = (
+    anomalies, if_entries = build_anomalies()
+    overrides_js = (
         f"<script>"
-        f"if (window.IDX_DATA) window.IDX_DATA.RANKINGS = {json.dumps(rankings)};"
+        f"if (window.IDX_DATA) {{"
+        f"  window.IDX_DATA.RANKINGS = {json.dumps(rankings)};"
+        f"  if ({json.dumps(bool(anomalies))}) window.IDX_DATA.ANOMALIES = {json.dumps(anomalies)};"
+        f"  if ({json.dumps(bool(if_entries))}) window.IDX_DATA.ISOLATION_FOREST = {json.dumps(if_entries)};"
+        f"}}"
         f"</script>"
     )
     html = html.replace(
         '<script type="text/babel" data-presets="react">',
-        rankings_js + '\n  <script type="text/babel" data-presets="react">',
+        overrides_js + '\n  <script type="text/babel" data-presets="react">',
         1,
     )
 

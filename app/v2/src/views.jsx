@@ -12,15 +12,17 @@ const KPI = ({ label, value, unit, color }) => (
   </div>
 );
 
-const DashboardView = ({ onPickTicker, onViewReport }) => {
+const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
   const [filter, setFilter]     = useStateV("ALL");
   const [breakout, setBreakout] = useStateV(false);
   const [minAdvB, setMinAdvB]   = useStateV(0);
 
+  const q = search.trim().toLowerCase();
   const rows = D.RANKINGS.filter(r => {
     if (filter !== "ALL" && r.action !== filter) return false;
     if (breakout && !r.breakout) return false;
     if (r.advB < minAdvB) return false;
+    if (q && !r.ticker.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) return false;
     return true;
   });
 

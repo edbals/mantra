@@ -1,5 +1,5 @@
 """
-MyMantra — About / Methodology page
+Mantra — About / Methodology page
 Long-form explainer rendered as a single Streamlit markdown column.
 Content sourced from mantra_final.md (Parts A, C, and the technical Appendix).
 """
@@ -8,7 +8,7 @@ from __future__ import annotations
 import streamlit as st
 
 st.set_page_config(
-    page_title="MyMantra | About",
+    page_title="Mantra | About",
     page_icon="📈",
     layout="wide",
     initial_sidebar_state="expanded",

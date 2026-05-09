@@ -100,7 +100,7 @@ def _print_results(df: pd.DataFrame, scoring_date: str, cfg, skipped: list,
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="MyMantra stock screener"
+        description="Mantra stock screener"
     )
     parser.add_argument(
         "--date",

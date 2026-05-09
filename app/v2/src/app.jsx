@@ -1,6 +1,5 @@
 // IDX Screener — main app shell with sidebar nav, top bar and view routing.
-// Tweaks panel removed for embedded Streamlit hosting.
-const { useState: useStateA, useEffect: useEffectA } = React;
+const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 
 const NAV = [
   { id:"dashboard",  label:"Watchlist",      icon:IconDashboard },
@@ -15,26 +14,45 @@ const App = () => {
   const [view, setView]       = useStateA("dashboard");
   const [ticker, setTicker]   = useStateA("MDIA");
   const [collapsed, setColl]  = useStateA(false);
+  const [search, setSearch]   = useStateA("");
+  const searchRef             = useRefA(null);
+
+  useEffectA(() => {
+    const onKey = (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchRef.current && searchRef.current.focus();
+      }
+      if (e.key === "Escape" && document.activeElement === searchRef.current) {
+        searchRef.current.blur();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div className={`app ${collapsed ? "collapsed" : ""}`} style={{ height:"100%" }}>
       <div className="topbar">
         <div className="brand">
-          <div className="brand-mark"/>
-          <div className="brand-name">MyMantra <span>· IDX Screener</span></div>
+          <PixelM size={26}/>
+          <div className="brand-name">Mantra <span>· IDX Screener</span></div>
         </div>
         <div className="search">
           <IconSearch w={14}/>
-          <input placeholder="Search ticker, company, sector…"/>
+          <input
+            ref={searchRef}
+            placeholder="Search ticker or company…"
+            value={search}
+            onChange={(e)=>{ setSearch(e.target.value); setView("dashboard"); }}
+          />
           <span className="kbd">⌘K</span>
         </div>
         <div className="topbar-right">
-          <span className="pill"><span className="live-dot"/> Live · IDX feed</span>
-          <button className="icon-btn" title="Notifications" style={{ position:"relative" }}>
-            <IconBell w={15}/>
-            <span style={{ position:"absolute", top:4, right:4, width:6, height:6, borderRadius:999, background:"var(--red)" }}/>
+          <span className="pill"><span className="live-dot"/> Updated on {window.SCORING_DATE || "—"}</span>
+          <button className="btn" title="Refresh" onClick={()=>window.parent && window.parent.location.reload()}>
+            <IconRefresh w={13}/>
           </button>
-          <button className="btn" title="Refresh"><IconRefresh w={13}/></button>
         </div>
       </div>
 
@@ -73,17 +91,11 @@ const App = () => {
           ))}
         </div>
         <div className="sidebar-spacer"/>
-        <div className="sidebar-footer">
-          <div className="avatar">YK</div>
-          <div className="sidebar-footer-text" style={{ display:"flex", flexDirection:"column" }}>
-            <span style={{ color:"var(--text-2)", fontSize:12 }}>You · analyst</span>
-            <span style={{ color:"var(--text-4)", fontSize:11 }}>Updated 12:04 WIB</span>
-          </div>
-        </div>
       </div>
 
       <div className="main">
         {view === "dashboard"  && <DashboardView
+          search={search}
           onPickTicker={(t)=>{setTicker(t); setView("ticker"); }}
           onViewReport={()=>setView("anomalies")}/>}
         {view === "ticker"     && <TickerView     ticker={ticker} setTicker={setTicker}/>}

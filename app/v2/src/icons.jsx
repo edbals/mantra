@@ -29,9 +29,51 @@ const IconSearch    = (p) => <Icon {...p}><circle cx="11" cy="11" r="7"/><path d
 const IconBell      = (p) => <Icon {...p}><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9z"/><path d="M10 21a2 2 0 0 0 4 0"/></Icon>;
 const IconDownload  = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></Icon>;
 
+// Mantra pixel-art M logo. White rounded squares on transparent background.
+// Pattern is 5 columns × 7 rows; each "1" becomes a rounded dot.
+const M_PATTERN = [
+  [1,0,0,0,1],
+  [1,1,0,1,1],
+  [1,0,1,0,1],
+  [1,0,0,0,1],
+  [1,0,0,0,1],
+  [1,0,0,0,1],
+  [1,0,0,0,1],
+];
+const PixelM = ({ size = 26, color = "#fff" }) => {
+  const cols = M_PATTERN[0].length;
+  const rows = M_PATTERN.length;
+  const cell = size / cols;
+  const dotSize = cell * 0.78;
+  const radius = dotSize * 0.22;
+  const dots = [];
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols; x++) {
+      if (!M_PATTERN[y][x]) continue;
+      dots.push(
+        <rect
+          key={`${x}-${y}`}
+          x={x * cell + (cell - dotSize) / 2}
+          y={y * cell + (cell - dotSize) / 2}
+          width={dotSize}
+          height={dotSize}
+          rx={radius}
+          ry={radius}
+          fill={color}
+        />
+      );
+    }
+  }
+  return (
+    <svg width={size} height={(size / cols) * rows} viewBox={`0 0 ${size} ${(size/cols)*rows}`} style={{ display:"block" }}>
+      {dots}
+    </svg>
+  );
+};
+
 Object.assign(window, {
   Icon, IconDashboard, IconScreener, IconAI, IconAnalytics, IconBroker, IconSettings,
   IconCheck, IconBookmark, IconChartBar, IconAnomaly, IconCalendar, IconRefresh,
   IconArrowUp, IconArrowDown, IconArrowFlat, IconBolt, IconHistory, IconExpand,
-  IconSearch, IconBell, IconDownload,
+  IconSearch, IconBell, IconDownload, PixelM,
 });
