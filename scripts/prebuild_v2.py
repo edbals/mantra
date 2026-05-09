@@ -195,6 +195,177 @@ def build_volume_anomalies(scores: pd.DataFrame, idxdb: Path, baseline_days: int
     return anomalies, if_entries[:15]
 
 
+def build_per_ticker_broker_data(scores: pd.DataFrame) -> tuple[dict, dict, dict]:
+    """
+    For each Stage 2 ticker, return:
+      top_buyers   : list of top 6 brokers by buy_volume today
+      top_sellers  : list of top 6 brokers by sell_volume today
+      broker_net   : list of all active brokers sorted by net volume today
+    """
+    if "broker_data_source" in scores.columns:
+        scores = scores[scores["broker_data_source"] == "indexalpha"]
+    scores = scores[scores["action"] != "ILLIQUID"]
+    if scores.empty: return {}, {}, {}
+
+    db_path = OUTPUT / "scores.db"
+    if not db_path.exists(): return {}, {}, {}
+
+    names = _broker_names()
+    tickers = scores["ticker"].tolist()
+
+    con = sqlite3.connect(str(db_path))
+    placeholders = ",".join("?" * len(tickers))
+    df = pd.read_sql_query(
+        f"""SELECT ticker, broker_code AS code, date,
+                   buy_volume, sell_volume
+            FROM broker_transactions
+            WHERE ticker IN ({placeholders}) AND investor_type='all'""",
+        con, params=tickers,
+    )
+    con.close()
+    if df.empty: return {}, {}, {}
+
+    df["buy_volume"]  = df["buy_volume"].fillna(0)
+    df["sell_volume"] = df["sell_volume"].fillna(0)
+    df["net"]         = df["buy_volume"] - df["sell_volume"]
+
+    top_buyers, top_sellers, broker_net = {}, {}, {}
+    for ticker, grp in df.groupby("ticker"):
+        latest = grp["date"].max()
+        today = grp[grp["date"] == latest].copy()
+        if today.empty: continue
+        today["name"] = today["code"].map(lambda c: str(names.get(c, c)).title()[:32])
+
+        top_buyers[ticker] = [
+            {"code": r["code"], "name": r["name"],
+             "buy":  round(float(r["buy_volume"]) / 1e6, 2),
+             "sell": round(float(r["sell_volume"]) / 1e6, 2)}
+            for _, r in today.nlargest(6, "buy_volume").iterrows()
+        ]
+        top_sellers[ticker] = [
+            {"code": r["code"], "name": r["name"],
+             "buy":  round(float(r["buy_volume"]) / 1e6, 2),
+             "sell": round(float(r["sell_volume"]) / 1e6, 2)}
+            for _, r in today.nlargest(6, "sell_volume").iterrows()
+        ]
+        # Broker net chart: top 16 by absolute net volume
+        chart = today.assign(abs_net=today["net"].abs()).nlargest(16, "abs_net")
+        broker_net[ticker] = [
+            {"code": r["code"], "net": round(float(r["net"]) / 1e6, 2)}
+            for _, r in chart.sort_values("net", ascending=False).iterrows()
+        ]
+
+    return top_buyers, top_sellers, broker_net
+
+
+def build_per_ticker_price_series(scores: pd.DataFrame, idxdb: Path, days: int = 30) -> dict:
+    """Last `days` of (date, close, volume) for each Stage 2 ticker."""
+    if "broker_data_source" in scores.columns:
+        scores = scores[scores["broker_data_source"] == "indexalpha"]
+    scores = scores[scores["action"] != "ILLIQUID"]
+    if scores.empty or not idxdb.exists(): return {}
+    tickers = scores["ticker"].tolist()
+
+    con = sqlite3.connect(str(idxdb), check_same_thread=False)
+    placeholders = ",".join("?" * len(tickers))
+    cutoff_ms = int((pd.Timestamp.now() - pd.Timedelta(days=days * 2 + 10)).timestamp() * 1000)
+    try:
+        df = pd.read_sql_query(
+            f"""SELECT code AS ticker, date AS date_ms, close, volume
+                FROM stock_summary
+                WHERE code IN ({placeholders}) AND date >= ? AND volume > 0
+                ORDER BY code, date""",
+            con, params=(*tickers, cutoff_ms))
+    finally:
+        con.close()
+    if df.empty: return {}
+
+    df["date"] = pd.to_datetime(df["date_ms"], unit="ms").dt.strftime("%m-%d")
+    out = {}
+    for ticker, grp in df.groupby("ticker"):
+        tail = grp.tail(days)
+        out[ticker] = [
+            {"date": r["date"], "close": int(round(r["close"])), "volume": int(r["volume"])}
+            for _, r in tail.iterrows()
+        ]
+    return out
+
+
+def build_per_ticker_flow_signals(scores: pd.DataFrame) -> dict[str, list[dict]]:
+    """4 flow-signal cards per ticker, derived from the scored CSV row."""
+    if "broker_data_source" in scores.columns:
+        scores = scores[scores["broker_data_source"] == "indexalpha"]
+    scores = scores[scores["action"] != "ILLIQUID"]
+    out = {}
+    for _, row in scores.iterrows():
+        absorption = _f(row.get("absorption_ratio"))
+        retail_ss  = _f(row.get("retail_sell_share")) * 100
+        streak     = int(_f(row.get("accum_streak")))
+        xl_trend_days = int(_f(row.get("xl_xc_trend_days")))
+        xl_selling = bool(row.get("xl_xc_selling"))
+        xl_buying  = bool(row.get("xl_xc_buying"))
+
+        signals = []
+        if absorption > 1.5:
+            signals.append({"label":"Institutional absorption", "value":f"{absorption:.2f}× (strong)", "tone":"green",
+                            "desc":"Institutions are buying more than retail is selling — float is tightening."})
+        elif absorption > 0.5:
+            signals.append({"label":"Institutional absorption", "value":f"{absorption:.2f}×", "tone":"amber",
+                            "desc":"Institutional buying matches retail selling roughly 1:1."})
+        else:
+            signals.append({"label":"Institutional absorption", "value":f"{absorption:.2f}× (weak)", "tone":"red",
+                            "desc":"Little institutional offset to retail flow."})
+
+        if xl_selling and not xl_buying:
+            signals.append({"label":"XL / XC divergence", "value":"Retail exit (bullish)", "tone":"green",
+                            "desc":"Stockbit/Ajaib/Mirae net selling — supply overhang lifting."})
+        elif xl_buying and not xl_selling:
+            signals.append({"label":"XL / XC divergence", "value":"Retail piling in (bearish)", "tone":"red",
+                            "desc":"Retail platforms are net buyers — often distribution territory."})
+        elif xl_trend_days >= 3:
+            signals.append({"label":"XL / XC trend", "value":f"{xl_trend_days}/10 days net selling", "tone":"green",
+                            "desc":"Sustained retail exit over the last two weeks."})
+        else:
+            signals.append({"label":"XL / XC divergence", "value":"None", "tone":"neutral",
+                            "desc":"No notable retail platform skew today."})
+
+        signals.append({"label":"Retail sell share (20d)", "value":f"{retail_ss:.1f}% of volume",
+                        "tone": "green" if retail_ss >= 5 else "neutral",
+                        "desc":"Share of 20-day volume that is retail net selling."})
+
+        signals.append({"label":"Institutional accumulation streak",
+                        "value": f"{streak} consecutive day{'s' if streak != 1 else ''}",
+                        "tone": "green" if streak >= 3 else "neutral",
+                        "desc":"Consecutive days institutional brokers were net buyers on this ticker."})
+
+        out[str(row["ticker"])] = signals
+    return out
+
+
+def build_per_ticker_score_history(scores: pd.DataFrame, days: int = 12) -> dict[str, list[dict]]:
+    """Investment score + broker flow score over the last `days` scored dates."""
+    if "broker_data_source" in scores.columns:
+        scores = scores[scores["broker_data_source"] == "indexalpha"]
+    scores = scores[scores["action"] != "ILLIQUID"]
+    if scores.empty: return {}
+    tickers = set(scores["ticker"].tolist())
+
+    csvs = sorted(glob.glob(str(OUTPUT / "scores_*.csv")))[-days:]
+    history = {t: [] for t in tickers}
+    for csv in csvs:
+        date = Path(csv).stem.replace("scores_", "")
+        df = pd.read_csv(csv)
+        df = df[df["ticker"].isin(tickers)]
+        for _, row in df.iterrows():
+            history[row["ticker"]].append({
+                "date":   date,
+                "action": str(row.get("action") or "OBSERVE"),
+                "invest": round(_f(row.get("investment_score")), 1),
+                "bf":     round(_f(row.get("broker_flow_real_score") or row.get("broker_flow_score")), 1),
+            })
+    return history
+
+
 def build_per_ticker_broker_if(scores: pd.DataFrame) -> dict[str, list[dict]]:
     if "broker_data_source" in scores.columns:
         scores = scores[scores["broker_data_source"] == "indexalpha"]
@@ -275,6 +446,10 @@ def main():
     ai_insights     = build_ai_insights(scores)
     anomalies, ifs  = build_volume_anomalies(scores, Path(args.idxdb))
     broker_if       = build_per_ticker_broker_if(scores)
+    top_buy, top_sell, broker_net = build_per_ticker_broker_data(scores)
+    price_series    = build_per_ticker_price_series(scores, Path(args.idxdb))
+    flow_signals    = build_per_ticker_flow_signals(scores)
+    score_history   = build_per_ticker_score_history(scores)
 
     payload = {
         "scoring_date":     scoring_date,
@@ -283,7 +458,13 @@ def main():
         "rankings":         rankings,
         "anomalies":        anomalies,
         "isolation_forest": ifs,
-        "broker_if_by_ticker": broker_if,
+        "broker_if_by_ticker":     broker_if,
+        "top_buyers_by_ticker":    top_buy,
+        "top_sellers_by_ticker":   top_sell,
+        "broker_net_by_ticker":    broker_net,
+        "price_series_by_ticker":  price_series,
+        "flow_signals_by_ticker":  flow_signals,
+        "score_history_by_ticker": score_history,
     }
 
     out_file = OUTPUT / f"v2_data_{scoring_date}.json"

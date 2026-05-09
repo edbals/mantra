@@ -95,6 +95,13 @@ D.PRICE_SERIES     = D.PRICE_SERIES     || [];
 D.SCORE_HISTORY    = D.SCORE_HISTORY    || [];
 D.ANOMALIES        = D.ANOMALIES        || [];
 D.ISOLATION_FOREST = D.ISOLATION_FOREST || [];
+D.BROKER_IF_BY_TICKER     = D.BROKER_IF_BY_TICKER     || {};
+D.TOP_BUYERS_BY_TICKER    = D.TOP_BUYERS_BY_TICKER    || {};
+D.TOP_SELLERS_BY_TICKER   = D.TOP_SELLERS_BY_TICKER   || {};
+D.BROKER_NET_BY_TICKER    = D.BROKER_NET_BY_TICKER    || {};
+D.PRICE_SERIES_BY_TICKER  = D.PRICE_SERIES_BY_TICKER  || {};
+D.FLOW_SIGNALS_BY_TICKER  = D.FLOW_SIGNALS_BY_TICKER  || {};
+D.SCORE_HISTORY_BY_TICKER = D.SCORE_HISTORY_BY_TICKER || {};
 
 const KPI = ({ label, value, unit, color }) => (
   <div className="kpi">
@@ -340,7 +347,7 @@ const ScoresTab = ({ ticker }) => {
 
       <Card title="Real broker flow signals" subtitle="Live institutional vs retail divergence">
         <div style={{ padding:"14px 18px 18px" }} className="flow-signals">
-          {D.FLOW_SIGNALS.map((s,i) => (
+          {(D.FLOW_SIGNALS_BY_TICKER[ticker] || D.FLOW_SIGNALS).map((s,i) => (
             <div key={i} className="flow-signal">
               <div className="flow-signal-head">
                 <div className="name">{s.label}</div>
@@ -359,18 +366,29 @@ const ScoresTab = ({ ticker }) => {
 };
 
 const BrokerTab = ({ ticker }) => {
-  const buyPct = 37, sellPct = 63;
-  const brokerIF = (D.BROKER_IF_BY_TICKER && D.BROKER_IF_BY_TICKER[ticker]) || [];
-  // Build broker name lookup from the IF data so net-volume bars can show names
+  const brokerIF   = D.BROKER_IF_BY_TICKER[ticker]   || [];
+  const topBuyers  = D.TOP_BUYERS_BY_TICKER[ticker]  || D.TOP_BUYERS;
+  const topSellers = D.TOP_SELLERS_BY_TICKER[ticker] || D.TOP_SELLERS;
+  const brokerNet  = D.BROKER_NET_BY_TICKER[ticker]  || D.BROKER_NET;
   const brokerNames = {};
   brokerIF.forEach(b => { brokerNames[b.code] = b.name; });
+  topBuyers.forEach(b => { brokerNames[b.code] = b.name; });
+  topSellers.forEach(b => { brokerNames[b.code] = b.name; });
+
+  // Compute KPIs from the per-ticker buyer/seller data
+  const totalBuy  = topBuyers.reduce((a,b)=>a + (b.buy  || 0), 0);
+  const totalSell = topSellers.reduce((a,b)=>a + (b.sell || 0), 0);
+  const netInst   = brokerNet.reduce((a,b)=>a + (b.net > 0 ? b.net : 0), 0);
+  const netRetail = brokerNet.reduce((a,b)=>a + (b.net < 0 ? b.net : 0), 0);
+  const buyPct  = (totalBuy + totalSell) > 0 ? Math.round(totalBuy / (totalBuy + totalSell) * 100) : 50;
+  const sellPct = 100 - buyPct;
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14 }}>
-        <KPI label="Institutional net" value="−43.17M" unit="lots" color="var(--red)"/>
-        <KPI label="Retail net"        value="+32.01M" unit="lots" color="var(--green)"/>
-        <KPI label="Total volume"      value="988.7M"  unit="lots"/>
-        <KPI label="Brokers active"    value="54"/>
+        <KPI label="Net buying" value={`${netInst >= 0 ? "+" : ""}${netInst.toFixed(1)}M`} unit="lots" color="var(--green)"/>
+        <KPI label="Net selling" value={`${netRetail.toFixed(1)}M`} unit="lots" color="var(--red)"/>
+        <KPI label="Total today" value={`${(totalBuy + totalSell).toFixed(1)}M`} unit="lots"/>
+        <KPI label="Brokers active" value={brokerNet.length}/>
       </div>
 
       <Card>
@@ -388,7 +406,7 @@ const BrokerTab = ({ ticker }) => {
               <span className="vol">Buy (M lots)</span>
               <span className="net">Net (M lots)</span>
             </div>
-            {D.TOP_BUYERS.map(b => (
+            {topBuyers.map(b => (
               <div key={b.code} className="b buy">
                 <span className="code">{b.code}</span>
                 <span className="name">{b.name}</span>
@@ -406,7 +424,7 @@ const BrokerTab = ({ ticker }) => {
               <span className="vol">Sell (M lots)</span>
               <span className="net">Net (M lots)</span>
             </div>
-            {D.TOP_SELLERS.map(b => (
+            {topSellers.map(b => (
               <div key={b.code} className="b sell">
                 <span className="code">{b.code}</span>
                 <span className="name">{b.name}</span>
@@ -420,7 +438,7 @@ const BrokerTab = ({ ticker }) => {
 
       <Card title="Net volume by broker" subtitle="Green = net buyer, red = net seller. Hover a bar to see the broker name.">
         <div style={{ padding:"6px 18px 8px" }}>
-          <NetVolumeBars data={D.BROKER_NET} brokerNames={brokerNames}/>
+          <NetVolumeBars data={brokerNet} brokerNames={brokerNames}/>
         </div>
       </Card>
 
@@ -455,65 +473,75 @@ const BrokerTab = ({ ticker }) => {
   );
 };
 
-const PriceTab = () => {
-  const last = D.PRICE_SERIES[D.PRICE_SERIES.length - 1];
-  const prevHigh = Math.max(...D.PRICE_SERIES.map(d=>d.close));
-  const prevLow  = Math.min(...D.PRICE_SERIES.map(d=>d.close));
+const PriceTab = ({ ticker }) => {
+  const series = D.PRICE_SERIES_BY_TICKER[ticker] || D.PRICE_SERIES;
+  if (!series || !series.length) {
+    return <Card title="Close & volume"><div style={{ padding:"40px 22px", color:"var(--text-3)", textAlign:"center" }}>No price history for {ticker}.</div></Card>;
+  }
+  const last = series[series.length - 1];
+  const prevHigh = Math.max(...series.map(d=>d.close));
+  const prevLow  = Math.min(...series.map(d=>d.close));
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-      <Card title="Close & volume" subtitle="30-day price action with volume profile">
+      <Card title={`${ticker} · close & volume`} subtitle="30-day price action with volume profile">
         <div style={{ padding:"6px 14px 14px" }}>
-          <PriceVolumeChart data={D.PRICE_SERIES}/>
+          <PriceVolumeChart data={series}/>
         </div>
       </Card>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14 }}>
         <KPI label="Close"        value={last.close.toLocaleString()}/>
         <KPI label="Volume"       value={(last.volume/1e6).toFixed(0) + "M"}/>
-        <KPI label="20-day high"  value={prevHigh.toLocaleString()}/>
-        <KPI label="20-day low"   value={prevLow.toLocaleString()}/>
+        <KPI label="30-day high"  value={prevHigh.toLocaleString()}/>
+        <KPI label="30-day low"   value={prevLow.toLocaleString()}/>
       </div>
     </div>
   );
 };
 
-const HistoryTab = () => (
-  <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
-    <Card title="Score history" subtitle="Investment score & broker flow over the last 12 sessions"
-      actions={
-        <div className="chart-legend">
-          <span className="legend-swatch"><i style={{ background:"var(--accent)" }}/> Investment</span>
-          <span className="legend-swatch"><i style={{ background:"var(--orange)" }}/> Broker flow</span>
+const HistoryTab = ({ ticker }) => {
+  const hist = D.SCORE_HISTORY_BY_TICKER[ticker] || [];
+  if (!hist.length) {
+    return <Card title="Score history"><div style={{ padding:"40px 22px", color:"var(--text-3)", textAlign:"center" }}>No prior scoring days for {ticker}.</div></Card>;
+  }
+  return (
+    <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+      <Card title={`${ticker} · score history`} subtitle={`Investment score & broker flow over the last ${hist.length} session${hist.length !== 1 ? "s" : ""}`}
+        actions={
+          <div className="chart-legend">
+            <span className="legend-swatch"><i style={{ background:"var(--accent)" }}/> Investment</span>
+            <span className="legend-swatch"><i style={{ background:"var(--orange)" }}/> Broker flow</span>
+          </div>
+        }>
+        <div style={{ padding:"6px 14px 16px" }}>
+          <ScoreHistoryChart data={hist}/>
         </div>
-      }>
-      <div style={{ padding:"6px 14px 16px" }}>
-        <ScoreHistoryChart data={D.SCORE_HISTORY}/>
-      </div>
-    </Card>
-    <Card title="Daily history">
-      <div style={{ overflow:"auto" }}>
-        <table className="tbl">
-          <thead>
-            <tr>
-              <th>Date</th><th>Action</th>
-              <th className="num right">Investment score</th>
-              <th className="num right">Broker flow score</th>
-            </tr>
-          </thead>
-          <tbody>
-            {[...D.SCORE_HISTORY].reverse().map(d => (
-              <tr key={d.date}>
-                <td className="mono">{d.date}</td>
-                <td><Badge label={d.action}/></td>
-                <td className="right num"><ScoreMini v={d.invest}/></td>
-                <td className="right num"><SparkBar v={d.bf} color={colorForSub(d.bf)} w={70}/></td>
+      </Card>
+      <Card title="Daily history">
+        <div style={{ overflow:"auto" }}>
+          <table className="tbl">
+            <thead>
+              <tr>
+                <th>Date</th><th>Action</th>
+                <th className="num right">Investment score</th>
+                <th className="num right">Broker flow score</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  </div>
-);
+            </thead>
+            <tbody>
+              {[...hist].reverse().map(d => (
+                <tr key={d.date}>
+                  <td className="mono">{d.date}</td>
+                  <td><Badge label={d.action}/></td>
+                  <td className="right num"><ScoreMini v={d.invest}/></td>
+                  <td className="right num"><SparkBar v={d.bf} color={colorForSub(d.bf)}/></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+    </div>
+  );
+};
 
 const TickerView = ({ ticker, setTicker }) => {
   const [tab, setTab] = useStateV("scores");
@@ -550,8 +578,8 @@ const TickerView = ({ ticker, setTicker }) => {
 
       {tab === "scores"  && <ScoresTab ticker={ticker}/>}
       {tab === "broker"  && <BrokerTab ticker={ticker}/>}
-      {tab === "price"   && <PriceTab/>}
-      {tab === "history" && <HistoryTab/>}
+      {tab === "price"   && <PriceTab ticker={ticker}/>}
+      {tab === "history" && <HistoryTab ticker={ticker}/>}
     </div>
   );
 };
