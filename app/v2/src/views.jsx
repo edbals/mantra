@@ -1,5 +1,84 @@
 // View components for IDX Screener prototype
-const { useState: useStateV } = React;
+const { useState: useStateV, useEffect: useEffectV, useRef: useRefV } = React;
+
+// ── Calendar popover — real month grid, not a select ───────────────────
+const Calendar = ({ value, available = [], onPick }) => {
+  const [open, setOpen] = useStateV(false);
+  const initial = value ? new Date(value + "T00:00:00") : new Date();
+  const [view, setView] = useStateV(initial);
+  const ref = useRefV(null);
+
+  useEffectV(() => {
+    if (!open) return;
+    const onDoc = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [open]);
+
+  const year  = view.getFullYear();
+  const month = view.getMonth();
+  const monthName = view.toLocaleString("en-US", { month: "long" });
+  const firstDOW = (new Date(year, month, 1).getDay() + 6) % 7;   // Mon=0..Sun=6
+  const daysIn = new Date(year, month + 1, 0).getDate();
+  const cells = Array.from({ length: firstDOW }, () => null)
+                     .concat(Array.from({ length: daysIn }, (_, i) => i + 1));
+  const fmt = (d) => `${year}-${String(month+1).padStart(2,"0")}-${String(d).padStart(2,"0")}`;
+  const avail = new Set(available);
+
+  return (
+    <div ref={ref} style={{ position:"relative" }}>
+      <button className="btn" onClick={()=>setOpen(!open)}>
+        <IconCalendar w={13}/> {value || "Select date"}
+      </button>
+      {open && (
+        <div style={{
+          position:"absolute", top:"calc(100% + 6px)", right:0, zIndex:200, width:268,
+          background:"var(--surface-1)", border:"1px solid var(--line-2)",
+          borderRadius:10, padding:14, boxShadow:"0 14px 38px rgba(0,0,0,.55)",
+        }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+            <button className="icon-btn" title="Previous month"
+              onClick={()=>setView(new Date(year, month - 1, 1))}>‹</button>
+            <span style={{ fontWeight:600, fontSize:13 }}>{monthName} {year}</span>
+            <button className="icon-btn" title="Next month"
+              onClick={()=>setView(new Date(year, month + 1, 1))}>›</button>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 1fr)", gap:4,
+                        fontSize:10, color:"var(--text-3)", textAlign:"center", marginBottom:4,
+                        textTransform:"uppercase", letterSpacing:"0.06em" }}>
+            {["Mo","Tu","We","Th","Fr","Sa","Su"].map((d,i)=> <div key={i}>{d}</div>)}
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(7, 1fr)", gap:4 }}>
+            {cells.map((d,i) => {
+              if (!d) return <div key={i}/>;
+              const ds = fmt(d);
+              const has = avail.has(ds);
+              const isSel = ds === value;
+              return (
+                <button key={i}
+                  disabled={!has}
+                  onClick={()=>{ if (has) { onPick(ds); setOpen(false); } }}
+                  style={{
+                    height:32, padding:0, fontSize:12,
+                    fontFamily:"var(--mono)", fontVariantNumeric:"tabular-nums",
+                    color:  isSel ? "#06181a" : has ? "var(--text)" : "var(--text-4)",
+                    background: isSel ? "var(--accent)" : has ? "oklch(1 0 0 / 0.04)" : "transparent",
+                    border: isSel ? "1px solid var(--accent)" : "1px solid transparent",
+                    borderRadius: 6,
+                    cursor: has ? "pointer" : "default",
+                    fontWeight: has ? 600 : 400,
+                    opacity: has ? 1 : 0.35,
+                  }}>
+                  {d}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
 const D = window.IDX_DATA || {};
 // Guarantee every key exists so an unexpected null doesn't crash a render
 D.RANKINGS         = D.RANKINGS         || [];
@@ -72,21 +151,14 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
           <div className="subtitle">Top scored by broker flow signal · scored {new Date().toDateString()}</div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <select
-            className="btn"
+          <Calendar
             value={window.SCORING_DATE || ""}
-            onChange={(e)=>{
-              const d = e.target.value;
-              if (!d) return;
-              // Cross-origin: can't READ parent.location, but can WRITE .search
+            available={(window.AVAILABLE_DATES || []).filter(Boolean)}
+            onPick={(d)=>{
               try { window.parent.location.search = "?date=" + encodeURIComponent(d); }
               catch(err) { console.error("date nav failed", err); }
             }}
-            style={{ paddingLeft:30, backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%23b8b6b2' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='16' rx='2'/><path d='M16 3v4M8 3v4M3 11h18'/></svg>\")", backgroundRepeat:"no-repeat", backgroundPosition:"10px center", appearance:"none" }}>
-            {(window.AVAILABLE_DATES || [window.SCORING_DATE]).filter(Boolean).map(d =>
-              <option key={d} value={d}>{d}</option>
-            )}
-          </select>
+          />
           <button className="btn-primary btn" onClick={()=>window.parent && window.parent.location.reload()}>
             <IconRefresh w={13}/> Refresh data
           </button>
