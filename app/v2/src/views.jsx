@@ -12,15 +12,17 @@ const KPI = ({ label, value, unit, color }) => (
   </div>
 );
 
-const DashboardView = ({ onPickTicker }) => {
+const DashboardView = ({ onPickTicker, onViewReport }) => {
   const [filter, setFilter]     = useStateV("ALL");
   const [breakout, setBreakout] = useStateV(false);
   const [minScore, setMinScore] = useStateV(0);
+  const [minAdvB, setMinAdvB]   = useStateV(0);
 
   const rows = D.RANKINGS.filter(r => {
     if (filter !== "ALL" && r.action !== filter) return false;
     if (breakout && !r.breakout) return false;
     if (r.score < minScore) return false;
+    if (r.advB < minAdvB) return false;
     return true;
   });
 
@@ -40,8 +42,10 @@ const DashboardView = ({ onPickTicker }) => {
           <div className="subtitle">Top scored by broker flow signal · scored {new Date().toDateString()}</div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <button className="btn"><IconCalendar w={13}/> 2026-05-08</button>
-          <button className="btn-primary btn"><IconRefresh w={13}/> Refresh data</button>
+          <span className="btn" style={{ cursor:"default" }}><IconCalendar w={13}/> {window.SCORING_DATE || "—"}</span>
+          <button className="btn-primary btn" onClick={()=>window.parent && window.parent.location.reload()}>
+            <IconRefresh w={13}/> Refresh data
+          </button>
         </div>
       </div>
 
@@ -83,7 +87,7 @@ const DashboardView = ({ onPickTicker }) => {
               "<b>3 tickers</b> show extreme broker anomaly scores (&gt;70). Institutional absorption detected in <b>MEDS</b>, <b>GOTO</b>, <b>MAPI</b>. <b>XL/XC retail divergence</b> confirmed across 7 tickers in the low-float segment."
             }}/>
         </div>
-        <button className="btn">View report</button>
+        <button className="btn" onClick={()=>onViewReport && onViewReport()}>View report</button>
       </div>
 
       <Card
@@ -101,6 +105,11 @@ const DashboardView = ({ onPickTicker }) => {
               Min score
               <input type="range" min="0" max="80" value={minScore} onChange={e=>setMinScore(+e.target.value)}/>
               <span className="mono" style={{ width:24, textAlign:"right" }}>{minScore}</span>
+            </span>
+            <span className="range-chip">
+              Min ADV
+              <input type="range" min="0" max="100" step="1" value={minAdvB} onChange={e=>setMinAdvB(+e.target.value)}/>
+              <span className="mono" style={{ width:36, textAlign:"right" }}>{minAdvB}B</span>
             </span>
           </div>
         }

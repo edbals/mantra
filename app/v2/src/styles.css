@@ -511,5 +511,3 @@ input, select { font: inherit; color: inherit; }
 .broker-list .b .net  { font-family: var(--mono); width: 64px; text-align: right; }
 .broker-list .b .net.pos { color: var(--green); }
 .broker-list .b .net.neg { color: var(--red); }
-</content>
-</invoke>

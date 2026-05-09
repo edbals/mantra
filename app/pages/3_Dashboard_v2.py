@@ -202,9 +202,17 @@ def build_inlined_html() -> str:
             f'<script type="text/babel" data-presets="react">{content}</script>',
         )
 
-    # Inject live AI insights banner BEFORE the React scripts run.
-    insights_js = f"<script>window.AI_INSIGHTS = {json.dumps(build_ai_insights())};</script>"
-    html = html.replace("<script src=\"https://unpkg.com/react@", insights_js + "\n  <script src=\"https://unpkg.com/react@", 1)
+    # Inject live AI insights banner + scoring date BEFORE the React scripts run.
+    csv_files = sorted(glob.glob(str(OUTPUT_DIR / "scores_*.csv")))
+    scoring_date = csv_files[-1].split("scores_")[-1].replace(".csv", "") if csv_files else ""
+
+    pre_js = (
+        f"<script>"
+        f"window.AI_INSIGHTS = {json.dumps(build_ai_insights())};"
+        f"window.SCORING_DATE = {json.dumps(scoring_date)};"
+        f"</script>"
+    )
+    html = html.replace("<script src=\"https://unpkg.com/react@", pre_js + "\n  <script src=\"https://unpkg.com/react@", 1)
 
     # Inject real RANKINGS — runs AFTER data.js sets window.IDX_DATA, BEFORE
     # the views.jsx script reads from it.

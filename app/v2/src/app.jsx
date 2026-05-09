@@ -83,7 +83,9 @@ const App = () => {
       </div>
 
       <div className="main">
-        {view === "dashboard"  && <DashboardView  onPickTicker={(t)=>{setTicker(t); setView("ticker"); }}/>}
+        {view === "dashboard"  && <DashboardView
+          onPickTicker={(t)=>{setTicker(t); setView("ticker"); }}
+          onViewReport={()=>setView("anomalies")}/>}
         {view === "ticker"     && <TickerView     ticker={ticker} setTicker={setTicker}/>}
         {view === "anomalies"  && <AnomaliesView/>}
       </div>
