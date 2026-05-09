@@ -1,7 +1,8 @@
 // Custom-rendered SVG charts.
 const { useState: useStateC, useMemo: useMemoC } = React;
 
-const NetVolumeBars = ({ data, height=460 }) => {
+const NetVolumeBars = ({ data, height=460, brokerNames = {} }) => {
+  const [hovered, setHovered] = useStateC(null);
   const sorted = [...data].sort((a,b)=>b.net - a.net);
   const max = Math.max(...sorted.map(d => Math.abs(d.net)));
   const padded = Math.ceil(max / 4) * 4 || 4;
@@ -41,20 +42,33 @@ const NetVolumeBars = ({ data, height=460 }) => {
         const isBuy = d.net >= 0;
         const w = Math.abs(xScale(d.net) - x0);
         const x = isBuy ? x0 : x0 - w;
+        const isHover = hovered === d.code;
         return (
-          <g key={d.code}>
+          <g key={d.code}
+             style={{ cursor:"pointer" }}
+             onMouseEnter={()=>setHovered(d.code)}
+             onMouseLeave={()=>setHovered(h => h === d.code ? null : h)}>
+            <rect x={padL} y={y} width={W - padL - padR} height={rowH} fill="transparent"/>
             <text x={padL - 10} y={y + rowH/2 + 3} textAnchor="end"
-              fill="var(--text-2)" style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:600 }}>
+              fill={isHover ? "var(--text)" : "var(--text-2)"} style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:600 }}>
               {d.code}
             </text>
             <rect x={x} y={y + 3} width={w} height={rowH - 6} rx="2"
-              fill={isBuy ? "url(#bar-buy)" : "url(#bar-sell)"}/>
+              fill={isBuy ? "url(#bar-buy)" : "url(#bar-sell)"}
+              opacity={hovered && !isHover ? 0.45 : 1}/>
             <text x={isBuy ? x + w + 6 : x - 6} y={y + rowH/2 + 3}
               textAnchor={isBuy ? "start" : "end"}
               fill={isBuy ? "var(--green)" : "var(--red)"}
               style={{ fontFamily:"var(--mono)", fontSize:11, fontWeight:600 }}>
               {d.net > 0 ? "+" : ""}{d.net.toFixed(1)}
             </text>
+            {isHover && brokerNames[d.code] && (
+              <text x={isBuy ? x + w + 60 : x - 60} y={y + rowH/2 + 3}
+                textAnchor={isBuy ? "start" : "end"}
+                fill="var(--text-2)" style={{ fontSize:11 }}>
+                {brokerNames[d.code]}
+              </text>
+            )}
           </g>
         );
       })}

@@ -32,29 +32,18 @@ const TrendArrow = ({ v = 0 }) => {
   return <span style={{ color:"var(--text-4)", fontSize:10 }}>⬬</span>;
 };
 
-const ScoreMini = ({ v }) => {
-  const col = colorForSub(v);
-  return (
-    <span className="score-cell">
-      <span className="score-num" style={{ color: col }}>{v.toFixed(1)}</span>
-      <span className="score-track">
-        <span className="score-fill" style={{ width: `${Math.max(2, Math.min(100, v))}%`, backgroundColor: col }}/>
-      </span>
-    </span>
-  );
-};
+// Bars removed — showing only the colored numeric value, easier to read in a dense table
+const ScoreMini = ({ v }) => (
+  <span style={{ fontFamily:"var(--mono)", fontWeight:600, color: colorForSub(v), fontVariantNumeric:"tabular-nums" }}>
+    {v.toFixed(1)}
+  </span>
+);
 
-const SparkBar = ({ v, color, w = 64 }) => {
-  const col = color || "var(--accent)";
-  return (
-    <span className="spark-bar">
-      <span className="num" style={{ color: col }}>{v.toFixed(1)}</span>
-      <span className="track" style={{ width: w }}>
-        <span className="fill" style={{ width:`${Math.max(2, Math.min(100, v))}%`, backgroundColor: col }}/>
-      </span>
-    </span>
-  );
-};
+const SparkBar = ({ v, color }) => (
+  <span style={{ fontFamily:"var(--mono)", color: color || "var(--accent)", fontVariantNumeric:"tabular-nums" }}>
+    {v.toFixed(1)}
+  </span>
+);
 
 const AnomalyTag = ({ v }) => {
   const cls = v >= 70 ? "high" : v >= 50 ? "mid" : "low";

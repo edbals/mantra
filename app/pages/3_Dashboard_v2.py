@@ -45,6 +45,12 @@ V2_DIR     = Path(__file__).parent.parent / "v2"
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
 
 
+def _csv_mtime() -> float:
+    """Cache key — invalidate when the latest scores CSV changes."""
+    csvs = glob.glob(str(OUTPUT_DIR / "scores_*.csv"))
+    return max((Path(c).stat().st_mtime for c in csvs), default=0.0)
+
+
 def _xlxc_state(row) -> str:
     """Map a scored row's xl/xc booleans to the prototype's enum."""
     if row.get("xl_xc_selling"):
@@ -135,7 +141,98 @@ def build_rankings(csv_path: Path | None = None) -> list[dict]:
     return rankings
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def build_per_ticker_broker_if(_csv_key: float) -> dict[str, list[dict]]:
+    """
+    For each Stage 2 ticker, run IsolationForest per broker on its history
+    and return today's anomaly score. Output: {ticker: [{code, name, score,
+    z, dir}, ...]}, top 10 brokers per ticker by IF score.
+    Cached — runs once per CSV update.
+    """
+    sys_path = str(Path(__file__).parent.parent.parent)
+    import sys as _sys
+    if sys_path not in _sys.path: _sys.path.insert(0, sys_path)
+    from src.anomaly import score_brokers
+
+    csv_path = pick_csv(None)
+    if csv_path is None: return {}
+    scores = pd.read_csv(csv_path)
+    if "broker_data_source" in scores.columns:
+        scores = scores[scores["broker_data_source"] == "indexalpha"]
+    scores = scores[scores["action"] != "ILLIQUID"]
+    if scores.empty: return {}
+    tickers = scores["ticker"].tolist()
+
+    db_path = OUTPUT_DIR / "scores.db"
+    if not db_path.exists(): return {}
+
+    # Load broker name lookup
+    try:
+        bm = pd.read_csv(Path(__file__).parent.parent.parent / "broker_master.csv")
+        col = next((c for c in bm.columns if c.strip().lower() in ("kode perusahaan", "broker_code", "code", "kode")), None)
+        ncol = next((c for c in bm.columns if c.strip().lower() in ("nama perusahaan", "name", "broker_name")), None)
+        names = dict(zip(bm[col].astype(str).str.strip(), bm[ncol])) if col and ncol else {}
+    except Exception:
+        names = {}
+
+    con = sqlite3.connect(str(db_path))
+    placeholders = ",".join("?" * len(tickers))
+    df = pd.read_sql_query(
+        f"""
+        SELECT date, ticker, broker_code AS code, buy_volume, sell_volume
+        FROM broker_transactions
+        WHERE ticker IN ({placeholders}) AND investor_type='all'
+        """,
+        con, params=tickers,
+    )
+    con.close()
+    if df.empty: return {}
+    df["net_volume"] = df["buy_volume"].fillna(0) - df["sell_volume"].fillna(0)
+
+    out = {}
+    for ticker, grp in df.groupby("ticker"):
+        dates = sorted(grp["date"].unique())
+        if len(dates) < 6: continue
+        today = dates[-1]
+        hist  = grp[grp["date"] < today]
+        sig   = grp[grp["date"] == today]
+        if hist.empty or sig.empty: continue
+
+        try:
+            scored = score_brokers(hist, sig, contamination=0.05)
+        except Exception:
+            continue
+        if scored.empty: continue
+
+        rows = []
+        for _, sr in scored.sort_values("anomaly_score", ascending=False).head(10).iterrows():
+            code = str(sr["code"])
+            today_net = float(sig[sig["code"] == code]["net_volume"].sum())
+            hist_net  = hist[hist["code"] == code]["net_volume"]
+            mu, sd = float(hist_net.mean()), float(hist_net.std() or 1.0)
+            z = (today_net - mu) / sd if sd else 0.0
+            rows.append({
+                "code":  code,
+                "name":  str(names.get(code, code)).title()[:40],
+                "score": int(round(float(sr["anomaly_score"]))),
+                "z":     round(z, 1),
+                "dir":   str(sr["direction"]),
+            })
+        out[ticker] = rows
+    return out
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_anomalies(_csv_key: float, baseline_days: int = 22) -> tuple[list[dict], list[dict]]:
+    return _build_anomalies_uncached(baseline_days)
+
+
 def build_anomalies(baseline_days: int = 22) -> tuple[list[dict], list[dict]]:
+    """Cached wrapper — re-runs only when the latest scores CSV changes."""
+    return _cached_anomalies(_csv_mtime(), baseline_days)
+
+
+def _build_anomalies_uncached(baseline_days: int = 22) -> tuple[list[dict], list[dict]]:
     """
     Per-STOCK volume anomaly detection across the Stage 2 universe.
     Finds tickers whose today's volume is statistically unusual vs their
@@ -383,28 +480,35 @@ def build_inlined_html() -> str:
             f'<script type="text/babel" data-presets="react">{content}</script>',
         )
 
-    # Inject live AI insights banner + scoring date BEFORE the React scripts run.
-    csv_files = sorted(glob.glob(str(OUTPUT_DIR / "scores_*.csv")))
-    scoring_date = csv_files[-1].split("scores_")[-1].replace(".csv", "") if csv_files else ""
+    # Resolve scoring date from URL query param (?date=YYYY-MM-DD), falling back to latest
+    requested_date = None
+    try:
+        requested_date = st.query_params.get("date")
+    except Exception:
+        pass
+    csv_path = pick_csv(requested_date)
+    scoring_date = csv_path.stem.replace("scores_", "") if csv_path else ""
+    available_dates = list_scored_dates()
 
     pre_js = (
         f"<script>"
-        f"window.AI_INSIGHTS = {json.dumps(build_ai_insights())};"
-        f"window.SCORING_DATE = {json.dumps(scoring_date)};"
+        f"window.AI_INSIGHTS    = {json.dumps(build_ai_insights())};"
+        f"window.SCORING_DATE   = {json.dumps(scoring_date)};"
+        f"window.AVAILABLE_DATES = {json.dumps(available_dates)};"
         f"</script>"
     )
     html = html.replace("<script src=\"https://unpkg.com/react@", pre_js + "\n  <script src=\"https://unpkg.com/react@", 1)
 
-    # Inject real RANKINGS + watchlist anomalies AFTER data.js sets
-    # window.IDX_DATA, BEFORE views.jsx reads from it.
-    rankings = build_rankings()
+    rankings   = build_rankings(csv_path)
     anomalies, if_entries = build_anomalies()
+    per_ticker_brokers    = build_per_ticker_broker_if(_csv_mtime())
     overrides_js = (
         f"<script>"
         f"if (window.IDX_DATA) {{"
         f"  window.IDX_DATA.RANKINGS = {json.dumps(rankings)};"
         f"  window.IDX_DATA.ANOMALIES = {json.dumps(anomalies)};"
         f"  window.IDX_DATA.ISOLATION_FOREST = {json.dumps(if_entries)};"
+        f"  window.IDX_DATA.BROKER_IF_BY_TICKER = {json.dumps(per_ticker_brokers)};"
         f"}}"
         f"</script>"
     )

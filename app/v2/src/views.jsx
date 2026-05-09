@@ -287,8 +287,12 @@ const ScoresTab = ({ ticker }) => {
   );
 };
 
-const BrokerTab = () => {
+const BrokerTab = ({ ticker }) => {
   const buyPct = 37, sellPct = 63;
+  const brokerIF = (D.BROKER_IF_BY_TICKER && D.BROKER_IF_BY_TICKER[ticker]) || [];
+  // Build broker name lookup from the IF data so net-volume bars can show names
+  const brokerNames = {};
+  brokerIF.forEach(b => { brokerNames[b.code] = b.name; });
   return (
     <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
       <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14 }}>
@@ -331,11 +335,39 @@ const BrokerTab = () => {
         </Card>
       </div>
 
-      <Card title="Net volume by broker" subtitle="Green = net buyer, Red = net seller">
+      <Card title="Net volume by broker" subtitle="Green = net buyer, red = net seller. Hover a bar to see the broker name.">
         <div style={{ padding:"6px 18px 8px" }}>
-          <NetVolumeBars data={D.BROKER_NET}/>
+          <NetVolumeBars data={D.BROKER_NET} brokerNames={brokerNames}/>
         </div>
       </Card>
+
+      {brokerIF.length > 0 && (
+        <Card title={`Isolation Forest — broker anomalies for ${ticker}`}
+              subtitle="Brokers whose activity on this ticker today is unusual vs their own history. Higher score = more anomalous.">
+          <div style={{ overflow:"auto" }}>
+            <table className="tbl">
+              <thead>
+                <tr>
+                  <th>Broker</th>
+                  <th className="num right">Z-score</th>
+                  <th className="num right">IF score</th>
+                  <th>Direction</th>
+                </tr>
+              </thead>
+              <tbody>
+                {brokerIF.map(b => (
+                  <tr key={b.code}>
+                    <td><span className="ticker-cell">{b.code}</span> <span className="muted2">— {b.name}</span></td>
+                    <td className="right num" style={{ color: b.z>0 ? "var(--green)" : "var(--red)" }}>{b.z>0?"+":""}{b.z.toFixed(1)}</td>
+                    <td className="right num"><AnomalyTag v={b.score}/></td>
+                    <td><XLXC v={b.dir==="buying"?"net-buy":(b.dir==="selling"?"net-sell":"balance")}/></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Card>
+      )}
     </div>
   );
 };
@@ -434,20 +466,20 @@ const TickerView = ({ ticker, setTicker }) => {
       </div>
 
       {tab === "scores"  && <ScoresTab ticker={ticker}/>}
-      {tab === "broker"  && <BrokerTab/>}
+      {tab === "broker"  && <BrokerTab ticker={ticker}/>}
       {tab === "price"   && <PriceTab/>}
       {tab === "history" && <HistoryTab/>}
     </div>
   );
 };
 
-const AnomaliesView = () => (
+const AnomaliesView = ({ onPickTicker }) => (
   <div className="page">
     <div className="page-head">
       <div>
-        <div className="eyebrow">AI insights</div>
-        <div className="h1">Volume anomalies — Stage 2 universe</div>
-        <div className="subtitle">Per-ticker Isolation Forest on volume + price action vs the last 22 trading days. Flagged when today's volume is statistically unusual (z ≥ 1.5) or IF marks the ticker anomalous. Direction = today's price move.</div>
+        <div className="eyebrow">Isolation Forest Insights</div>
+        <div className="h1">Volume anomalies today</div>
+        <div className="subtitle">Stocks whose trading volume today is unusually different from their normal pattern over the last 22 trading days. Highlights stocks that may be moving on news or accumulation. Click any row to open the ticker.</div>
       </div>
       <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
         <div>
@@ -485,7 +517,9 @@ const AnomaliesView = () => (
               </td></tr>
             )}
             {D.ANOMALIES.map(a => (
-              <tr key={a.code}>
+              <tr key={a.code}
+                  onClick={()=>onPickTicker && onPickTicker(a.code)}
+                  style={{ cursor: onPickTicker ? "pointer" : "default" }}>
                 <td><span className="ticker-cell">{a.code}</span> <span className="muted2">— {a.name}</span></td>
                 <td className="right num">{a.signal.toFixed(2)}</td>
                 <td className="right num muted">{a.baseline.toFixed(2)}</td>

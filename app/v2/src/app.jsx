@@ -4,7 +4,7 @@ const { useState: useStateA, useEffect: useEffectA, useRef: useRefA } = React;
 const NAV = [
   { id:"dashboard",  label:"Watchlist",      icon:IconDashboard },
   { id:"ticker",     label:"Ticker detail",  icon:IconScreener  },
-  { id:"anomalies",  label:"AI Insights",    icon:IconAI        },
+  { id:"anomalies",  label:"IF Insights",    icon:IconAI        },
   { id:"analytics",  label:"Analytics",      icon:IconAnalytics, disabled:true },
   { id:"brokers",    label:"Broker explorer",icon:IconBroker,    disabled:true },
   { id:"settings",   label:"Settings",       icon:IconSettings,  disabled:true },
@@ -99,7 +99,7 @@ const App = () => {
           onPickTicker={(t)=>{setTicker(t); setView("ticker"); }}
           onViewReport={()=>setView("anomalies")}/>}
         {view === "ticker"     && <TickerView     ticker={ticker} setTicker={setTicker}/>}
-        {view === "anomalies"  && <AnomaliesView/>}
+        {view === "anomalies"  && <AnomaliesView onPickTicker={(t)=>{setTicker(t); setView("ticker"); }}/>}
       </div>
     </div>
   );
