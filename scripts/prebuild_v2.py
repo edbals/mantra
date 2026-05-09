@@ -288,8 +288,15 @@ def main():
 
     out_file = OUTPUT / f"v2_data_{scoring_date}.json"
     out_file.write_text(json.dumps(payload, separators=(",", ":")))
-    (OUTPUT / "v2_data_latest.json").write_text(json.dumps(payload, separators=(",", ":")))
-    print(f"wrote {out_file} ({out_file.stat().st_size // 1024}KB)", flush=True)
+
+    # Only overwrite "latest" if THIS date is actually the latest in the universe
+    # (prevents older backfill runs from clobbering today's data).
+    actual_latest = max(Path(c).stem.replace("scores_", "") for c in csvs)
+    if scoring_date == actual_latest:
+        (OUTPUT / "v2_data_latest.json").write_text(json.dumps(payload, separators=(",", ":")))
+        print(f"wrote {out_file} + latest ({out_file.stat().st_size // 1024}KB)", flush=True)
+    else:
+        print(f"wrote {out_file} (skipped latest — newer date {actual_latest} exists)", flush=True)
 
 
 if __name__ == "__main__":

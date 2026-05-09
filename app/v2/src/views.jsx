@@ -155,8 +155,12 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
             value={window.SCORING_DATE || ""}
             available={(window.AVAILABLE_DATES || []).filter(Boolean)}
             onPick={(d)=>{
-              try { window.parent.location.search = "?date=" + encodeURIComponent(d); }
-              catch(err) { console.error("date nav failed", err); }
+              const target = "?date=" + encodeURIComponent(d);
+              // Try every escalation: window.top (whole tab), then parent
+              try { window.top.location.search = target; return; } catch(_){ }
+              try { window.parent.location.search = target; return; } catch(_){ }
+              // Last resort — open in new tab
+              try { window.open(target, "_top"); } catch(_){ }
             }}
           />
           <button className="btn-primary btn" onClick={()=>window.parent && window.parent.location.reload()}>
