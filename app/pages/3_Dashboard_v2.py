@@ -41,6 +41,65 @@ V2_DIR     = Path(__file__).parent.parent / "v2"
 OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
 
 
+def _xlxc_state(row) -> str:
+    """Map a scored row's xl/xc booleans to the prototype's enum."""
+    if row.get("xl_xc_selling"):
+        return "net-sell"
+    if row.get("xl_xc_buying"):
+        return "net-buy"
+    return "balance"
+
+
+def _anomaly_proxy(row) -> int:
+    """
+    The prototype expects a 0–100 anomaly score per ticker. We don't store
+    one in the CSV, so synthesise from existing signals:
+      score_adj  ∈ ~[-15, 30]  →  scaled to ~[0, 90]
+      accum_streak ∈ [0, 10]   →  +0–10 bonus when above 3
+    """
+    adj = float(row.get("score_adj") or 0)
+    streak = float(row.get("accum_streak") or 0)
+    base = max(0.0, adj) * 3.0
+    streak_bonus = max(0.0, min(10.0, streak - 3) * 2.0)
+    return int(min(100, base + streak_bonus + abs(min(0.0, adj)) * 1.5))
+
+
+def build_rankings() -> list[dict]:
+    """Build the RANKINGS array from the latest scores CSV (Stage 2 only)."""
+    csv_files = sorted(glob.glob(str(OUTPUT_DIR / "scores_*.csv")))
+    if not csv_files:
+        return []
+    df = pd.read_csv(csv_files[-1])
+
+    if "broker_data_source" in df.columns:
+        df = df[df["broker_data_source"] == "indexalpha"].copy()
+    if "action" in df.columns:
+        df = df[df["action"] != "ILLIQUID"].copy()
+    if df.empty:
+        return []
+
+    df = df.sort_values("investment_score", ascending=False).reset_index(drop=True)
+
+    rankings = []
+    for i, row in df.iterrows():
+        rankings.append({
+            "rank":          int(i + 1),
+            "ticker":        str(row["ticker"]),
+            "name":          str(row.get("company_name") or row["ticker"])[:60],
+            "action":        str(row.get("action") or "OBSERVE"),
+            "score":         round(float(row.get("investment_score") or 0), 1),
+            "breakout":      bool(row.get("breakout_signal")),
+            "brokerFlow":    round(float(row.get("broker_flow_real_score") or 0), 1),
+            "floatPressure": round(float(row.get("float_pressure_score") or 0), 1),
+            "anomaly":       _anomaly_proxy(row),
+            "xlxc":          _xlxc_state(row),
+            "close":         int(float(row.get("close") or 0)),
+            "advB":          round(float(row.get("avg_daily_value_idr") or 0) / 1e9, 1),
+            "trend":         0,
+        })
+    return rankings
+
+
 def build_ai_insights() -> str:
     """
     Compose the AI Insights banner from the latest scored CSV. Pure data lookup
@@ -132,6 +191,20 @@ def build_inlined_html() -> str:
     # Inject live AI insights banner BEFORE the React scripts run.
     insights_js = f"<script>window.AI_INSIGHTS = {json.dumps(build_ai_insights())};</script>"
     html = html.replace("<script src=\"https://unpkg.com/react@", insights_js + "\n  <script src=\"https://unpkg.com/react@", 1)
+
+    # Inject real RANKINGS — runs AFTER data.js sets window.IDX_DATA, BEFORE
+    # the views.jsx script reads from it.
+    rankings = build_rankings()
+    rankings_js = (
+        f"<script>"
+        f"if (window.IDX_DATA) window.IDX_DATA.RANKINGS = {json.dumps(rankings)};"
+        f"</script>"
+    )
+    html = html.replace(
+        '<script type="text/babel" data-presets="react">',
+        rankings_js + '\n  <script type="text/babel" data-presets="react">',
+        1,
+    )
 
     return html
 
