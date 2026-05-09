@@ -28,37 +28,56 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# Strip Streamlit chrome so the embedded app fills the viewport
+# Strip Streamlit chrome so the embedded app fills the viewport,
+# and float the date picker over the top-right of the dashboard topbar.
 st.markdown(
     """
     <style>
       header[data-testid="stHeader"] { display: none; }
-      .block-container { padding: 0 !important; max-width: 100% !important; }
+      .block-container { padding: 0 !important; max-width: 100% !important; background:#0b0b0a; }
       footer { display: none; }
       [data-testid="stSidebarCollapsedControl"] { display: block; }
-      /* Date picker bar above the embedded app */
-      .date-bar {
-        background: #0b0b0a;
-        padding: 10px 20px;
-        border-bottom: 1px solid rgba(255,255,255,0.08);
+
+      /* Wrap row that holds the date picker; we slot it over the iframe topbar */
+      .mantra-date-row {
+        position: absolute;
+        top: 11px;
+        right: 22px;
+        z-index: 50;
         display: flex;
         align-items: center;
-        gap: 10px;
-        font-family: 'Geist', system-ui, sans-serif;
+        gap: 8px;
       }
-      .date-bar-label {
-        font-size: 11px;
-        text-transform: uppercase;
-        letter-spacing: 0.1em;
-        color: #797876;
-        font-weight: 500;
+      /* Streamlit's date picker, restyled to match the dashboard .btn look */
+      [data-testid="stMainBlockContainer"] [data-testid="stDateInput"] {
+        position: absolute;
+        top: 11px;
+        right: 22px;
+        z-index: 50;
+        width: 156px;
       }
-      div[data-testid="stDateInput"] { width: 220px; }
-      div[data-testid="stDateInput"] input {
-        background: #1a1918 !important; color: #e8e6e2 !important;
-        border: 1px solid rgba(255,255,255,0.06) !important;
-        font-family: 'Geist Mono', monospace !important;
+      [data-testid="stDateInput"] label { display: none !important; }
+      [data-testid="stDateInput"] > div { gap: 0 !important; }
+      [data-testid="stDateInput"] input {
+        background: #1a1918 !important;
+        color: #e8e6e2 !important;
+        border: 1px solid rgba(255,255,255,0.08) !important;
+        border-radius: 6px !important;
+        height: 34px !important;
+        padding: 0 12px !important;
+        font-family: 'Geist Mono', ui-monospace, monospace !important;
+        font-size: 12.5px !important;
       }
+      [data-testid="stDateInput"] input:hover {
+        border-color: rgba(255,255,255,0.16) !important;
+      }
+      /* The popover calendar pane — dark theme so it doesn't clash */
+      [data-baseweb="calendar"], [data-baseweb="datepicker"] {
+        background: #1a1918 !important;
+        color: #e8e6e2 !important;
+        border: 1px solid rgba(255,255,255,0.10) !important;
+      }
+      [data-baseweb="calendar"] button { color: #e8e6e2 !important; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -585,18 +604,14 @@ if _available:
         pass
     _initial = _date.fromisoformat(_q) if _q in _available else _max_d
 
-    _col_label, _col_picker, _col_spacer = st.columns([1, 3, 12])
-    with _col_label:
-        st.markdown("<div style='padding-top:18px;font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:#797876;font-weight:500'>Scoring date</div>", unsafe_allow_html=True)
-    with _col_picker:
-        _picked = st.date_input(
-            "Scoring date",
-            value=_initial,
-            min_value=_min_d,
-            max_value=_max_d,
-            label_visibility="collapsed",
-            format="YYYY-MM-DD",
-        )
+    _picked = st.date_input(
+        "Scoring date",
+        value=_initial,
+        min_value=_min_d,
+        max_value=_max_d,
+        label_visibility="collapsed",
+        format="YYYY-MM-DD",
+    )
     _picked_str = _picked.isoformat()
     if _picked_str in _available and _picked_str != _q:
         st.query_params["date"] = _picked_str
