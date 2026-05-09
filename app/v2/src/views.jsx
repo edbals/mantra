@@ -54,23 +54,27 @@ const Calendar = ({ value, available = [], onPick }) => {
               const ds = fmt(d);
               const has = avail.has(ds);
               const isSel = ds === value;
+              const cellStyle = {
+                display:"flex", alignItems:"center", justifyContent:"center",
+                height:32, fontSize:12,
+                fontFamily:"var(--mono)", fontVariantNumeric:"tabular-nums",
+                color:  isSel ? "#06181a" : has ? "var(--text)" : "var(--text-4)",
+                background: isSel ? "var(--accent)" : has ? "oklch(1 0 0 / 0.04)" : "transparent",
+                border: isSel ? "1px solid var(--accent)" : "1px solid transparent",
+                borderRadius: 6,
+                cursor: has ? "pointer" : "default",
+                fontWeight: has ? 600 : 400,
+                opacity: has ? 1 : 0.35,
+                textDecoration:"none",
+                userSelect:"none",
+              };
+              if (!has) return <div key={i} style={cellStyle}>{d}</div>;
+              // Native <a target="_top"> escapes the iframe sandbox reliably
               return (
-                <button key={i}
-                  disabled={!has}
-                  onClick={()=>{ if (has) { onPick(ds); setOpen(false); } }}
-                  style={{
-                    height:32, padding:0, fontSize:12,
-                    fontFamily:"var(--mono)", fontVariantNumeric:"tabular-nums",
-                    color:  isSel ? "#06181a" : has ? "var(--text)" : "var(--text-4)",
-                    background: isSel ? "var(--accent)" : has ? "oklch(1 0 0 / 0.04)" : "transparent",
-                    border: isSel ? "1px solid var(--accent)" : "1px solid transparent",
-                    borderRadius: 6,
-                    cursor: has ? "pointer" : "default",
-                    fontWeight: has ? 600 : 400,
-                    opacity: has ? 1 : 0.35,
-                  }}>
+                <a key={i} href={`?date=${ds}`} target="_top" style={cellStyle}
+                   onClick={()=>setOpen(false)}>
                   {d}
-                </button>
+                </a>
               );
             })}
           </div>
