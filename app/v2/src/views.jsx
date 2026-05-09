@@ -15,13 +15,11 @@ const KPI = ({ label, value, unit, color }) => (
 const DashboardView = ({ onPickTicker, onViewReport }) => {
   const [filter, setFilter]     = useStateV("ALL");
   const [breakout, setBreakout] = useStateV(false);
-  const [minScore, setMinScore] = useStateV(0);
   const [minAdvB, setMinAdvB]   = useStateV(0);
 
   const rows = D.RANKINGS.filter(r => {
     if (filter !== "ALL" && r.action !== filter) return false;
     if (breakout && !r.breakout) return false;
-    if (r.score < minScore) return false;
     if (r.advB < minAdvB) return false;
     return true;
   });
@@ -101,11 +99,6 @@ const DashboardView = ({ onPickTicker, onViewReport }) => {
             <button className={`chip ${breakout?"active":""}`} onClick={()=>setBreakout(!breakout)}>
               <IconBolt w={11}/> Breakout only
             </button>
-            <span className="range-chip">
-              Min score
-              <input type="range" min="0" max="80" value={minScore} onChange={e=>setMinScore(+e.target.value)}/>
-              <span className="mono" style={{ width:24, textAlign:"right" }}>{minScore}</span>
-            </span>
             <span className="range-chip">
               Min ADV
               <input type="range" min="0" max="100" step="1" value={minAdvB} onChange={e=>setMinAdvB(+e.target.value)}/>
