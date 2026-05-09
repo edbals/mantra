@@ -46,9 +46,10 @@ OUTPUT_DIR = Path(__file__).parent.parent.parent / "output"
 
 
 def _csv_mtime() -> float:
-    """Cache key — invalidate when the latest scores CSV changes."""
-    csvs = glob.glob(str(OUTPUT_DIR / "scores_*.csv"))
-    return max((Path(c).stat().st_mtime for c in csvs), default=0.0)
+    """Cache key — invalidate when ANY scored or prebuilt artifact changes."""
+    files  = glob.glob(str(OUTPUT_DIR / "scores_*.csv"))
+    files += glob.glob(str(OUTPUT_DIR / "v2_data_*.json"))
+    return max((Path(c).stat().st_mtime for c in files), default=0.0)
 
 
 def _xlxc_state(row) -> str:
