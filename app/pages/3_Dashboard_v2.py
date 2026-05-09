@@ -467,6 +467,15 @@ def build_inlined_html(requested_date: str | None = None) -> str:
     return _cached_inlined_html(_csv_mtime(), requested_date or "")
 
 
+def _load_prebuilt(requested_date: str | None) -> dict | None:
+    """Load the JSON artifact written by scripts/prebuild_v2.py."""
+    if requested_date:
+        f = OUTPUT_DIR / f"v2_data_{requested_date}.json"
+        if f.exists(): return json.loads(f.read_text())
+    f = OUTPUT_DIR / "v2_data_latest.json"
+    return json.loads(f.read_text()) if f.exists() else None
+
+
 def _build_inlined_html_uncached(requested_date: str | None = None) -> str:
     """Read index.html and inline every local CSS/JS file referenced by it."""
     html = (V2_DIR / "index.html").read_text()
@@ -490,30 +499,41 @@ def _build_inlined_html_uncached(requested_date: str | None = None) -> str:
             f'<script type="text/babel" data-presets="react">{content}</script>',
         )
 
-    # Resolve scoring date — caller passed via cache key
-    csv_path = pick_csv(requested_date or None)
-    scoring_date = csv_path.stem.replace("scores_", "") if csv_path else ""
-    available_dates = list_scored_dates()
+    # Read prebuilt JSON; fall back to on-demand compute if it's missing
+    payload = _load_prebuilt(requested_date)
+    if payload is None:
+        csv_path = pick_csv(requested_date or None)
+        scoring_date = csv_path.stem.replace("scores_", "") if csv_path else ""
+        payload = {
+            "scoring_date":         scoring_date,
+            "available_dates":      list_scored_dates(),
+            "ai_insights":          build_ai_insights(),
+            "rankings":             build_rankings(csv_path),
+            "anomalies":            [],
+            "isolation_forest":     [],
+            "broker_if_by_ticker":  {},
+        }
+        a, ifs = build_anomalies()
+        payload["anomalies"] = a
+        payload["isolation_forest"] = ifs
+        payload["broker_if_by_ticker"] = build_per_ticker_broker_if(_csv_mtime())
 
     pre_js = (
         f"<script>"
-        f"window.AI_INSIGHTS    = {json.dumps(build_ai_insights())};"
-        f"window.SCORING_DATE   = {json.dumps(scoring_date)};"
-        f"window.AVAILABLE_DATES = {json.dumps(available_dates)};"
+        f"window.AI_INSIGHTS    = {json.dumps(payload['ai_insights'])};"
+        f"window.SCORING_DATE   = {json.dumps(payload['scoring_date'])};"
+        f"window.AVAILABLE_DATES = {json.dumps(payload['available_dates'])};"
         f"</script>"
     )
     html = html.replace("<script src=\"https://unpkg.com/react@", pre_js + "\n  <script src=\"https://unpkg.com/react@", 1)
 
-    rankings   = build_rankings(csv_path)
-    anomalies, if_entries = build_anomalies()
-    per_ticker_brokers    = build_per_ticker_broker_if(_csv_mtime())
     overrides_js = (
         f"<script>"
         f"if (window.IDX_DATA) {{"
-        f"  window.IDX_DATA.RANKINGS = {json.dumps(rankings)};"
-        f"  window.IDX_DATA.ANOMALIES = {json.dumps(anomalies)};"
-        f"  window.IDX_DATA.ISOLATION_FOREST = {json.dumps(if_entries)};"
-        f"  window.IDX_DATA.BROKER_IF_BY_TICKER = {json.dumps(per_ticker_brokers)};"
+        f"  window.IDX_DATA.RANKINGS = {json.dumps(payload['rankings'])};"
+        f"  window.IDX_DATA.ANOMALIES = {json.dumps(payload['anomalies'])};"
+        f"  window.IDX_DATA.ISOLATION_FOREST = {json.dumps(payload['isolation_forest'])};"
+        f"  window.IDX_DATA.BROKER_IF_BY_TICKER = {json.dumps(payload['broker_if_by_ticker'])};"
         f"}}"
         f"</script>"
     )
