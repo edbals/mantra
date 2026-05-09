@@ -5,11 +5,15 @@ Content sourced from mantra_final.md (Parts A, C, and the technical Appendix).
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import streamlit as st
+
+_LOGO = Path(__file__).parent.parent / "v2" / "logo.png"
 
 st.set_page_config(
     page_title="Mantra | About",
-    page_icon="📈",
+    page_icon=str(_LOGO) if _LOGO.exists() else "📈",
     layout="wide",
     initial_sidebar_state="expanded",
 )

@@ -30,12 +30,11 @@ const IconBell      = (p) => <Icon {...p}><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3
 const IconDownload  = (p) => <Icon {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M7 10l5 5 5-5"/><path d="M12 15V3"/></Icon>;
 
 // Mantra pixel-art M logo. White rounded squares on transparent background.
-// 5 columns × 5 rows — legs cropped tight so the M reads square-ish.
+// 5 columns × 4 rows — short legs.
 const M_PATTERN = [
   [1,0,0,0,1],
   [1,1,0,1,1],
   [1,0,1,0,1],
-  [1,0,0,0,1],
   [1,0,0,0,1],
 ];
 const PixelM = ({ size = 26, color = "#fff" }) => {

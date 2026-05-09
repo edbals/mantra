@@ -9,9 +9,11 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 
+_LOGO = Path(__file__).parent.parent / "v2" / "logo.png"
+
 st.set_page_config(
     page_title="White Paper — Mantra",
-    page_icon="📄",
+    page_icon=str(_LOGO) if _LOGO.exists() else "📄",
     layout="wide",
     initial_sidebar_state="collapsed",
 )

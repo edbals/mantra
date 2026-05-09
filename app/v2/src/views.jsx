@@ -16,15 +16,34 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
   const [filter, setFilter]     = useStateV("ALL");
   const [breakout, setBreakout] = useStateV(false);
   const [minAdvB, setMinAdvB]   = useStateV(0);
+  const [sortKey, setSortKey]   = useStateV("rank");
+  const [sortDir, setSortDir]   = useStateV("asc");
+
+  const toggleSort = (key) => {
+    if (sortKey === key) setSortDir(sortDir === "asc" ? "desc" : "asc");
+    else { setSortKey(key); setSortDir(key === "rank" || key === "ticker" ? "asc" : "desc"); }
+  };
 
   const q = search.trim().toLowerCase();
-  const rows = D.RANKINGS.filter(r => {
+  const filtered = D.RANKINGS.filter(r => {
     if (filter !== "ALL" && r.action !== filter) return false;
     if (breakout && !r.breakout) return false;
     if (r.advB < minAdvB) return false;
     if (q && !r.ticker.toLowerCase().includes(q) && !r.name.toLowerCase().includes(q)) return false;
     return true;
   });
+  const rows = [...filtered].sort((a, b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av === bv) return 0;
+    if (typeof av === "string") return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+    return sortDir === "asc" ? (av - bv) : (bv - av);
+  });
+
+  const SortHeader = ({ k, label, className = "" }) => (
+    <th className={`sortable ${className}`} onClick={()=>toggleSort(k)}>
+      {label}{sortKey === k && <span className="sort-arrow">{sortDir === "asc" ? "▲" : "▼"}</span>}
+    </th>
+  );
 
   const kpis = [
     { label:"Invest signals", value: D.RANKINGS.filter(r=>r.action==="INVEST").length, unit:"", delta:{ v:"+2", up:true,  hint:"vs yesterday" }, color:"var(--green)",  icon:<IconCheck w={14}/> },
@@ -42,25 +61,20 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
           <div className="subtitle">Top scored by broker flow signal · scored {new Date().toDateString()}</div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <label className="btn" style={{ cursor:"pointer", position:"relative" }}>
-            <IconCalendar w={13}/> {window.SCORING_DATE || "—"}
-            <input
-              type="date"
-              defaultValue={window.SCORING_DATE || ""}
-              max={(window.AVAILABLE_DATES && window.AVAILABLE_DATES[0]) || ""}
-              min={(window.AVAILABLE_DATES && window.AVAILABLE_DATES[window.AVAILABLE_DATES.length - 1]) || ""}
-              onChange={(e)=>{
-                if (!e.target.value) return;
-                const url = new URL(window.parent.location.href);
-                url.searchParams.set("date", e.target.value);
-                window.parent.location.href = url.toString();
-              }}
-              style={{
-                position:"absolute", inset:0, opacity:0, cursor:"pointer",
-                width:"100%", height:"100%", padding:0, border:0
-              }}
-            />
-          </label>
+          <select
+            className="btn"
+            value={window.SCORING_DATE || ""}
+            onChange={(e)=>{
+              if (!e.target.value) return;
+              const url = new URL(window.parent.location.href);
+              url.searchParams.set("date", e.target.value);
+              window.parent.location.href = url.toString();
+            }}
+            style={{ paddingLeft:30, backgroundImage: "url(\"data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='13' height='13' viewBox='0 0 24 24' fill='none' stroke='%23b8b6b2' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5' width='18' height='16' rx='2'/><path d='M16 3v4M8 3v4M3 11h18'/></svg>\")", backgroundRepeat:"no-repeat", backgroundPosition:"10px center", appearance:"none" }}>
+            {(window.AVAILABLE_DATES || [window.SCORING_DATE]).filter(Boolean).map(d =>
+              <option key={d} value={d}>{d}</option>
+            )}
+          </select>
           <button className="btn-primary btn" onClick={()=>window.parent && window.parent.location.reload()}>
             <IconRefresh w={13}/> Refresh data
           </button>
@@ -131,11 +145,18 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
           <table className="tbl">
             <thead>
               <tr>
-                <th>#</th><th>Ticker</th><th>Company</th><th>Action</th>
-                <th className="num right">Score</th><th>Breakout</th>
-                <th className="num">Broker flow</th><th className="num">Float pressure</th>
-                <th className="num">Anomaly</th><th>XL / XC</th>
-                <th className="num right">Close (IDR)</th><th className="num right">ADV (B)</th>
+                <SortHeader k="rank"          label="#"/>
+                <SortHeader k="ticker"        label="Ticker"/>
+                <SortHeader k="name"          label="Company"/>
+                <SortHeader k="action"        label="Action"/>
+                <SortHeader k="score"         label="Score"          className="num right"/>
+                <SortHeader k="breakout"      label="Breakout"/>
+                <SortHeader k="brokerFlow"    label="Broker flow"    className="num"/>
+                <SortHeader k="floatPressure" label="Float pressure" className="num"/>
+                <SortHeader k="anomaly"       label="Anomaly"        className="num"/>
+                <SortHeader k="xlxc"          label="XL / XC"/>
+                <SortHeader k="close"         label="Close (IDR)"    className="num right"/>
+                <SortHeader k="advB"          label="ADV (B)"        className="num right"/>
               </tr>
             </thead>
             <tbody>

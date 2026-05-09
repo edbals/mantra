@@ -321,18 +321,25 @@ input, select { font: inherit; color: inherit; }
 }
 .score-num { width: 38px; text-align: right; font-weight: 600; }
 .score-track {
-  width: 70px; height: 4px; background: oklch(1 0 0 / 0.07); border-radius: 999px; overflow: hidden;
+  width: 70px; height: 6px; background: oklch(1 0 0 / 0.10); border-radius: 999px; overflow: hidden;
 }
-.score-fill { height: 100%; border-radius: 999px; }
+.score-fill { height: 100%; border-radius: 999px; min-width: 2px; }
 
 .spark-bar {
   display: inline-flex; align-items: center; gap: 8px;
 }
 .spark-bar .num { font-family: var(--mono); font-size: 12.5px; width: 36px; text-align: right; }
 .spark-bar .track {
-  width: 64px; height: 4px; background: oklch(1 0 0 / 0.07); border-radius: 999px; overflow: hidden;
+  width: 64px; height: 6px; background: oklch(1 0 0 / 0.10); border-radius: 999px; overflow: hidden;
 }
-.spark-bar .fill { height: 100%; border-radius: 999px; }
+.spark-bar .fill { height: 100%; border-radius: 999px; min-width: 2px; }
+
+.tbl thead th.sortable { cursor: pointer; user-select: none; }
+.tbl thead th.sortable:hover { color: var(--text); }
+.tbl thead th .sort-arrow {
+  display: inline-block; margin-left: 4px; font-size: 9px; color: var(--accent);
+  vertical-align: middle;
+}
 
 .badge {
   display: inline-flex; align-items: center; gap: 5px;

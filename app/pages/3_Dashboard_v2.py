@@ -19,9 +19,11 @@ import pandas as pd
 import streamlit as st
 import streamlit.components.v1 as components
 
+_LOGO = Path(__file__).parent.parent / "v2" / "logo.png"
+
 st.set_page_config(
     page_title="Dashboard v2 — Mantra",
-    page_icon="📊",
+    page_icon=str(_LOGO) if _LOGO.exists() else "📊",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -77,12 +79,29 @@ def _f(v, default=0.0) -> float:
         return default
 
 
-def build_rankings() -> list[dict]:
-    """Build the RANKINGS array from the latest scores CSV (Stage 2 only)."""
-    csv_files = sorted(glob.glob(str(OUTPUT_DIR / "scores_*.csv")))
-    if not csv_files:
+def list_scored_dates() -> list[str]:
+    """Sorted (newest first) list of dates with a scores CSV."""
+    csvs = glob.glob(str(OUTPUT_DIR / "scores_*.csv"))
+    return sorted([Path(c).stem.replace("scores_", "") for c in csvs], reverse=True)
+
+
+def pick_csv(date: str | None) -> Path | None:
+    """Return the CSV path for `date` if it exists, else the latest."""
+    if date:
+        candidate = OUTPUT_DIR / f"scores_{date}.csv"
+        if candidate.exists():
+            return candidate
+    csvs = sorted(glob.glob(str(OUTPUT_DIR / "scores_*.csv")))
+    return Path(csvs[-1]) if csvs else None
+
+
+def build_rankings(csv_path: Path | None = None) -> list[dict]:
+    """Build the RANKINGS array from a scores CSV (Stage 2 only)."""
+    if csv_path is None:
+        csv_path = pick_csv(None)
+    if csv_path is None or not csv_path.exists():
         return []
-    df = pd.read_csv(csv_files[-1])
+    df = pd.read_csv(csv_path)
 
     if "broker_data_source" in df.columns:
         df = df[df["broker_data_source"] == "indexalpha"].copy()
