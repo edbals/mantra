@@ -380,25 +380,37 @@ const BrokerTab = ({ ticker }) => {
       </Card>
 
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
-        <Card title="Top buyers" subtitle="By buy volume">
+        <Card title="Top buyers" subtitle="By buy volume — net = buys − sells">
           <div className="broker-list">
+            <div className="b-head">
+              <span>Code</span>
+              <span>Broker</span>
+              <span className="vol">Buy (M lots)</span>
+              <span className="net">Net (M lots)</span>
+            </div>
             {D.TOP_BUYERS.map(b => (
               <div key={b.code} className="b buy">
                 <span className="code">{b.code}</span>
                 <span className="name">{b.name}</span>
-                <span className="vol">{b.buy.toFixed(2)}M</span>
+                <span className="vol">{b.buy.toFixed(2)}</span>
                 <span className={`net ${(b.buy-b.sell) >= 0 ? "pos":"neg"}`}>{(b.buy-b.sell) >= 0 ? "+":""}{(b.buy-b.sell).toFixed(2)}</span>
               </div>
             ))}
           </div>
         </Card>
-        <Card title="Top sellers" subtitle="By sell volume">
+        <Card title="Top sellers" subtitle="By sell volume — net = buys − sells">
           <div className="broker-list">
+            <div className="b-head">
+              <span>Code</span>
+              <span>Broker</span>
+              <span className="vol">Sell (M lots)</span>
+              <span className="net">Net (M lots)</span>
+            </div>
             {D.TOP_SELLERS.map(b => (
               <div key={b.code} className="b sell">
                 <span className="code">{b.code}</span>
                 <span className="name">{b.name}</span>
-                <span className="vol">{b.sell.toFixed(2)}M</span>
+                <span className="vol">{b.sell.toFixed(2)}</span>
                 <span className={`net ${(b.buy-b.sell) >= 0 ? "pos":"neg"}`}>{(b.buy-b.sell) >= 0 ? "+":""}{(b.buy-b.sell).toFixed(2)}</span>
               </div>
             ))}
