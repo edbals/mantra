@@ -78,9 +78,10 @@ const DashboardView = ({ onPickTicker }) => {
               <span className="live-dot" style={{ width:5, height:5, background:"var(--accent)", boxShadow:"0 0 6px var(--accent)" }}/> LIVE
             </span>
           </div>
-          <div className="ai-banner-text" style={{ marginTop:6 }}>
-            <b>3 tickers</b> show extreme broker anomaly scores (&gt;70). Institutional absorption detected in <b>MEDS</b>, <b>GOTO</b>, <b>MAPI</b>. <b>XL/XC retail divergence</b> confirmed across 7 tickers in the low-float segment.
-          </div>
+          <div className="ai-banner-text" style={{ marginTop:6 }}
+            dangerouslySetInnerHTML={{ __html: window.AI_INSIGHTS ||
+              "<b>3 tickers</b> show extreme broker anomaly scores (&gt;70). Institutional absorption detected in <b>MEDS</b>, <b>GOTO</b>, <b>MAPI</b>. <b>XL/XC retail divergence</b> confirmed across 7 tickers in the low-float segment."
+            }}/>
         </div>
         <button className="btn">View report</button>
       </div>
