@@ -457,7 +457,17 @@ def build_ai_insights() -> str:
     return " ".join(parts)
 
 
-def build_inlined_html() -> str:
+@st.cache_data(ttl=3600, show_spinner=False)
+def _cached_inlined_html(_csv_key: float, requested_date: str | None) -> str:
+    return _build_inlined_html_uncached(requested_date)
+
+
+def build_inlined_html(requested_date: str | None = None) -> str:
+    """Cached wrapper — rebuild only when CSV changes or date param differs."""
+    return _cached_inlined_html(_csv_mtime(), requested_date or "")
+
+
+def _build_inlined_html_uncached(requested_date: str | None = None) -> str:
     """Read index.html and inline every local CSS/JS file referenced by it."""
     html = (V2_DIR / "index.html").read_text()
 
@@ -480,13 +490,8 @@ def build_inlined_html() -> str:
             f'<script type="text/babel" data-presets="react">{content}</script>',
         )
 
-    # Resolve scoring date from URL query param (?date=YYYY-MM-DD), falling back to latest
-    requested_date = None
-    try:
-        requested_date = st.query_params.get("date")
-    except Exception:
-        pass
-    csv_path = pick_csv(requested_date)
+    # Resolve scoring date — caller passed via cache key
+    csv_path = pick_csv(requested_date or None)
     scoring_date = csv_path.stem.replace("scores_", "") if csv_path else ""
     available_dates = list_scored_dates()
 
@@ -521,4 +526,9 @@ def build_inlined_html() -> str:
     return html
 
 
-components.html(build_inlined_html(), height=1100, scrolling=True)
+_requested = ""
+try:
+    _requested = st.query_params.get("date") or ""
+except Exception:
+    pass
+components.html(build_inlined_html(_requested), height=1100, scrolling=True)
