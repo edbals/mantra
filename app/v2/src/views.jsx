@@ -435,8 +435,8 @@ const AnomaliesView = () => (
     <div className="page-head">
       <div>
         <div className="eyebrow">AI insights</div>
-        <div className="h1">Watchlist broker anomalies</div>
-        <div className="subtitle">Comparing today's activity against 22-day historical baseline. Flagged when broker net volume is unusually high (z-score ≥ 1.5) or the Isolation Forest model marks it as anomalous.</div>
+        <div className="h1">Volume anomalies — Stage 2 universe</div>
+        <div className="subtitle">Per-ticker Isolation Forest on volume + price action vs the last 22 trading days. Flagged when today's volume is statistically unusual (z ≥ 1.5) or IF marks the ticker anomalous. Direction = today's price move.</div>
       </div>
       <div style={{ display:"flex", gap:10, alignItems:"flex-end" }}>
         <div>
@@ -454,25 +454,30 @@ const AnomaliesView = () => (
       </div>
     </div>
 
-    <Card title="Flagged brokers · today" subtitle="Z-score outliers — Isolation Forest concurrence">
+    <Card title="Flagged tickers · today" subtitle="Volume z-score outliers — Isolation Forest concurrence">
       <div style={{ overflow:"auto" }}>
         <table className="tbl">
           <thead>
             <tr>
-              <th>Broker</th>
-              <th className="num right">Signal [today] (M)</th>
-              <th className="num right">Baseline 22d (M)</th>
+              <th>Ticker</th>
+              <th className="num right">Volume today (M lots)</th>
+              <th className="num right">Avg 22d (M lots)</th>
               <th className="num right">Z-score</th>
               <th className="num right">IF score</th>
               <th>Direction</th>
             </tr>
           </thead>
           <tbody>
+            {D.ANOMALIES.length === 0 && (
+              <tr><td colSpan="6" style={{ textAlign:"center", color:"var(--text-3)", padding:"22px" }}>
+                No volume anomalies flagged today across the Stage 2 universe.
+              </td></tr>
+            )}
             {D.ANOMALIES.map(a => (
               <tr key={a.code}>
                 <td><span className="ticker-cell">{a.code}</span> <span className="muted2">— {a.name}</span></td>
-                <td className="right num" style={{ color: a.signal>0 ? "var(--green)" : "var(--red)" }}>{a.signal>0?"+":""}{a.signal.toFixed(2)}</td>
-                <td className="right num" style={{ color: a.baseline>0 ? "var(--green)" : "var(--red)" }}>{a.baseline>0?"+":""}{a.baseline.toFixed(2)}</td>
+                <td className="right num">{a.signal.toFixed(2)}</td>
+                <td className="right num muted">{a.baseline.toFixed(2)}</td>
                 <td className="right num" style={{ color: a.z>0 ? "var(--green)" : "var(--red)" }}>{a.z>0?"+":""}{a.z.toFixed(1)}</td>
                 <td className="right num"><AnomalyTag v={Math.round(a.ifScore)}/></td>
                 <td><XLXC v={a.dir==="buy"?"net-buy":"net-sell"}/></td>
@@ -485,7 +490,7 @@ const AnomaliesView = () => (
 
     <div style={{ marginTop:16 }}/>
 
-    <Card title="Isolation Forest — all watchlist brokers" subtitle="IF score ≥ 50 moderate · ≥ 70 strong"
+    <Card title="Isolation Forest — top tickers by volume anomaly" subtitle="IF score ≥ 50 moderate · ≥ 70 strong"
       actions={
         <div className="chart-legend">
           <span className="legend-swatch"><i style={{ background:"var(--green)" }}/> Buying</span>

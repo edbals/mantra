@@ -137,111 +137,161 @@ def build_rankings(csv_path: Path | None = None) -> list[dict]:
 
 def build_anomalies(baseline_days: int = 22) -> tuple[list[dict], list[dict]]:
     """
-    Real anomaly detection per watchlist broker, aggregated across all Stage 2
-    tickers. Combines:
-      - z-score on net volume (today vs baseline mean)
-      - Isolation Forest (sklearn) on (net_volume, buy_volume, sell_volume,
-        buy_ratio, net_ratio) — fitted on historical baseline only.
+    Per-STOCK volume anomaly detection across the Stage 2 universe.
+    Finds tickers whose today's volume is statistically unusual vs their
+    own 22-day baseline. Uses sklearn IsolationForest on (volume, value,
+    rel_volume_20d, range_pct, close_chg_pct) — fit on baseline only.
 
-    Returns (anomalies, isolation_forest) — both arrays always populated when
-    we have enough data; anomalies is the subset that crosses thresholds.
+    Direction reflects today's price move (close vs prev close):
+      "buy"  = volume spike on an up day  (likely accumulation/breakout)
+      "sell" = volume spike on a down day (likely distribution/capitulation)
+
+    Returns (anomalies, isolation_forest):
+      - anomalies: rows where |z| >= 1.5 OR IF score >= 50
+      - isolation_forest: top ~12 tickers by IF score for the chart
     """
-    import sys
-    sys.path.insert(0, str(Path(__file__).parent.parent.parent))
-    from src.anomaly import score_brokers
-
     config_path = Path(__file__).parent.parent.parent / "config.json"
     if not config_path.exists():
         return [], []
     cfg = json.loads(config_path.read_text())
-    watchlist = cfg.get("broker_watchlist", [])
-    if not watchlist:
+
+    idxdb_raw = cfg.get("idxdb_path", "")
+    idxdb = Path(idxdb_raw) if idxdb_raw.startswith("/") else (Path(__file__).parent.parent.parent / idxdb_raw)
+    if not idxdb.exists():
         return [], []
 
-    db_path = OUTPUT_DIR / "scores.db"
-    if not db_path.exists():
+    csv_path = pick_csv(None)
+    if csv_path is None:
         return [], []
+    scores = pd.read_csv(csv_path)
+    if "broker_data_source" in scores.columns:
+        scores = scores[scores["broker_data_source"] == "indexalpha"]
+    scores = scores[scores["action"] != "ILLIQUID"]
+    if scores.empty:
+        return [], []
+    tickers = scores["ticker"].tolist()
+    name_map = dict(zip(scores["ticker"], scores.get("company_name", scores["ticker"])))
 
-    con = sqlite3.connect(str(db_path))
-    placeholders = ",".join("?" * len(watchlist))
-    df = pd.read_sql_query(
-        f"""
-        SELECT date, broker_code AS code,
-               SUM(buy_volume)  AS buy_volume,
-               SUM(sell_volume) AS sell_volume
-        FROM broker_transactions
-        WHERE broker_code IN ({placeholders})
-        GROUP BY date, broker_code
-        ORDER BY date
-        """,
-        con, params=watchlist,
-    )
-    con.close()
-
-    # Broker names from broker_master.csv
+    # Pull last ~30 trading days of OHLCV for these tickers
+    con = sqlite3.connect(str(idxdb), check_same_thread=False)
+    placeholders = ",".join("?" * len(tickers))
+    cutoff_ms = int((pd.Timestamp.now() - pd.Timedelta(days=baseline_days * 2 + 10)).timestamp() * 1000)
     try:
-        bm = pd.read_csv(Path(__file__).parent.parent.parent / "broker_master.csv")
-        col = next((c for c in bm.columns if c.strip().lower() in ("kode perusahaan", "broker_code", "code", "kode")), None)
-        ncol = next((c for c in bm.columns if c.strip().lower() in ("nama perusahaan", "name", "broker_name")), None)
-        names = dict(zip(bm[col].astype(str).str.strip(), bm[ncol])) if col and ncol else {}
-    except Exception:
-        names = {}
+        df = pd.read_sql_query(
+            f"""
+            SELECT code AS ticker, date AS date_ms, open, high, low, close, volume, value
+            FROM stock_summary
+            WHERE code IN ({placeholders})
+              AND date >= ?
+              AND volume > 0
+            ORDER BY code, date
+            """,
+            con, params=(*tickers, cutoff_ms),
+        )
+    finally:
+        con.close()
 
     if df.empty:
         return [], []
 
-    df["net_volume"] = df["buy_volume"].fillna(0) - df["sell_volume"].fillna(0)
+    df["date"] = pd.to_datetime(df["date_ms"], unit="ms").dt.date
+    df = df.sort_values(["ticker", "date"])
 
-    dates = sorted(df["date"].unique())
-    if len(dates) < 5:
+    # Per-ticker rolling features
+    df["prev_close"]    = df.groupby("ticker")["close"].shift(1)
+    df["close_chg_pct"] = (df["close"] - df["prev_close"]) / df["prev_close"]
+    df["range_pct"]     = (df["high"] - df["low"]) / df["close"]
+    df["vol_ma20"]      = df.groupby("ticker")["volume"].transform(lambda s: s.rolling(20, min_periods=5).mean())
+    df["rel_volume"]    = df["volume"] / df["vol_ma20"]
+
+    df = df.dropna(subset=["close_chg_pct", "rel_volume", "range_pct"])
+    if df.empty:
         return [], []
-    today = dates[-1]
-    baseline_dates = dates[-baseline_days-1:-1]
 
-    hist_df   = df[df["date"].isin(baseline_dates)].copy()
-    signal_df = df[df["date"] == today].copy()
-    if signal_df.empty or hist_df.empty:
+    # Latest date in IDX is "today" for this analysis
+    today = df["date"].max()
+    baseline = df[df["date"] < today].copy()
+    signal   = df[df["date"] == today].copy()
+
+    # Real IsolationForest per-ticker — fit on baseline only
+    from sklearn.ensemble import IsolationForest
+    from sklearn.preprocessing import StandardScaler
+
+    FEATS = ["volume", "value", "rel_volume", "range_pct", "close_chg_pct"]
+    MIN_BASELINE = 15
+
+    rows = []
+    for ticker, sig_grp in signal.groupby("ticker"):
+        hist = baseline[baseline["ticker"] == ticker]
+        if len(hist) < MIN_BASELINE:
+            continue
+        sig_row = sig_grp.iloc[0]
+
+        # z-score on volume vs baseline volume
+        vol_mean = float(hist["volume"].mean())
+        vol_std  = float(hist["volume"].std()) or 1.0
+        z = (float(sig_row["volume"]) - vol_mean) / vol_std
+
+        # IsolationForest
+        try:
+            X_h = hist[FEATS].values
+            X_s = sig_grp[FEATS].values
+            scaler = StandardScaler().fit(X_h)
+            model = IsolationForest(n_estimators=120, contamination=0.05, random_state=42)
+            model.fit(scaler.transform(X_h))
+            raw = float(model.decision_function(scaler.transform(X_s))[0])
+            if_score = float(np.clip((-raw + 0.5) * 100, 0, 100))
+        except Exception:
+            if_score = 0.0
+
+        chg = float(sig_row["close_chg_pct"])
+        direction = "buy" if chg >= 0 else "sell"
+
+        rows.append({
+            "ticker":    ticker,
+            "name":      str(name_map.get(ticker, ticker))[:40],
+            "vol_today": float(sig_row["volume"]),
+            "vol_mean":  vol_mean,
+            "z":         z,
+            "if_score":  if_score,
+            "dir":       direction,
+            "chg_pct":   chg,
+        })
+
+    if not rows:
         return [], []
 
-    # Real Isolation Forest scores (sklearn, per-broker)
-    if_scored = score_brokers(hist_df, signal_df, contamination=0.05)
-    if_score_map = dict(zip(if_scored["code"], if_scored["anomaly_score"])) if not if_scored.empty else {}
-
-    # Z-scores on net volume (M lots) for the ANOMALIES table
+    # Build the two output arrays
     anomalies = []
     if_entries = []
-    for code in watchlist:
-        broker_hist = hist_df[hist_df["code"] == code]["net_volume"]
-        if len(broker_hist) < 5:
-            continue
-        today_net = float(signal_df[signal_df["code"] == code]["net_volume"].sum())
-        mu = float(broker_hist.mean())
-        sigma = float(broker_hist.std()) or 1.0
-        z = (today_net - mu) / sigma
-
-        if_score = float(if_score_map.get(code, 0.0))
-        direction = "buy" if today_net > 0 else "sell"
-        name = str(names.get(code, code)).title()[:40]
+    for r in rows:
+        anom_signal_m = round(r["vol_today"] / 1e6, 2)   # M lots
+        anom_baseline_m = round(r["vol_mean"] / 1e6, 2)
+        if_score_int = int(round(r["if_score"]))
+        z_round = round(r["z"], 1)
 
         if_entries.append({
-            "code":  code,
-            "name":  name,
-            "score": int(round(if_score)),
-            "dir":   direction,
+            "code":  r["ticker"],
+            "name":  r["name"],
+            "score": if_score_int,
+            "dir":   r["dir"],
         })
-        if abs(z) >= 1.0 or if_score >= 40:
+        if abs(r["z"]) >= 1.5 or r["if_score"] >= 50:
             anomalies.append({
-                "code":     code,
-                "name":     name,
-                "signal":   round(today_net / 1e6, 2),
-                "baseline": round(mu / 1e6, 2),
-                "z":        round(z, 1),
-                "ifScore":  int(round(if_score)),
-                "dir":      direction,
+                "code":     r["ticker"],
+                "name":     r["name"],
+                "signal":   anom_signal_m,
+                "baseline": anom_baseline_m,
+                "z":        z_round,
+                "ifScore":  if_score_int,
+                "dir":      r["dir"],
             })
 
-    anomalies.sort(key=lambda r: max(abs(r["z"]), r["ifScore"] / 30), reverse=True)
-    if_entries.sort(key=lambda r: r["score"])
+    # Top anomalies first; for IF chart show top 15 most anomalous
+    anomalies.sort(key=lambda r: (r["ifScore"], abs(r["z"])), reverse=True)
+    if_entries.sort(key=lambda r: r["score"], reverse=True)
+    if_entries = if_entries[:15]
+
     return anomalies, if_entries
 
 
