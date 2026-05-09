@@ -49,10 +49,7 @@ const App = () => {
           <span className="kbd">⌘K</span>
         </div>
         <div className="topbar-right">
-          <span className="pill"><span className="live-dot"/> Updated on {window.SCORING_DATE || "—"}</span>
-          <button className="btn" title="Refresh" onClick={()=>window.parent && window.parent.location.reload()}>
-            <IconRefresh w={13}/>
-          </button>
+          {/* Date is shown by the Streamlit date picker that sits over this corner */}
         </div>
       </div>
 

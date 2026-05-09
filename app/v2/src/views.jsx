@@ -155,9 +155,6 @@ const DashboardView = ({ search = "", onPickTicker, onViewReport }) => {
           <div className="subtitle">Top scored by broker flow signal · scored {new Date().toDateString()}</div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
-          <span className="btn" style={{ cursor:"default" }}>
-            <IconCalendar w={13}/> {window.SCORING_DATE || "—"}
-          </span>
           <button className="btn-primary btn" onClick={()=>window.parent && window.parent.location.reload()}>
             <IconRefresh w={13}/> Refresh data
           </button>
